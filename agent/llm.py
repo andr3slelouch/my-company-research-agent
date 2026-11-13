@@ -11,12 +11,10 @@ from typing import Any
 
 from .jsonutil import JSONExtractionError, extract_json
 
-DEFAULT_MODEL = "claude-sonnet-5-5"
-MODEL_OPTIONS = {
-    "Claude Sonnet 5.5 (balanced, recommended)": "claude-sonnet-5-5",
-    "Claude Opus 5.5 (deepest research, slower)": "claude-opus-5-5",
-    "Claude Haiku 5.5 (fastest, cheapest)": "claude-haiku-5-5",
-}
+# Haiku keeps API costs low. To upgrade later, change this one line
+# (e.g. "claude-sonnet-5-5") or set the MODEL secret / env var.
+DEFAULT_MODEL = "claude-haiku-5-5"
+MODEL_LABEL = "Claude Haiku 5.5"
 WEB_SEARCH_TOOL_TYPE = "web_search_20250305"
 
 
@@ -49,8 +47,8 @@ class ResearchLLM:
         prompt: str,
         system: str,
         *,
-        max_tokens: int = 8000,
-        max_searches: int = 6,
+        max_tokens: int = 6000,
+        max_searches: int = 4,
         web: bool | None = None,
     ) -> LLMResult:
         """Send a prompt, let Claude search if enabled, and parse a JSON reply."""

@@ -6,16 +6,19 @@ Run locally:  streamlit run app.py
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import os
+import time
 
 import streamlit as st
 
-from agent.llm import DEFAULT_MODEL, MODEL_OPTIONS, LLMError, ResearchLLM
+from agent.llm import DEFAULT_MODEL, MODEL_LABEL, LLMError, ResearchLLM
+from agent.news import NEWS_WINDOW_DAYS
 from agent.report import to_markdown
 from agent.research import build_profile, research_company, suggest_companies
 from agent.resume import extract_text, load_sample, resume_hash
-from agent.scoring import LABELS, clamp, label_for
+from agent.scoring import LABELS, WEIGHTS, clamp, label_for
 
 st.set_page_config(page_title="Company Research Agent", page_icon="🧭", layout="wide")
 
@@ -28,7 +31,7 @@ NAV_PROFILE = "📄 My profile"
 # --------------------------------------------------------------------------- #
 defaults = {
     "nav": NAV_DISCOVER,
-    "profiles": {},        # (resume_hash, model) -> profile
+    "profiles": {},        # resume_hash -> profile
     "research": {},        # cache key -> result
     "history": [],         # ordered list of cache keys
     "active_key": None,
@@ -42,41 +45,56 @@ for k, v in defaults.items():
 
 def _secret(name: str) -> str:
     try:
-        return str(st.secrets.get(name, "") or "")
+        value = st.secrets.get(name, "")
     except Exception:  # no secrets.toml present
-        return os.environ.get(name, "")
+        value = ""
+    return str(value or os.environ.get(name, "") or "")
 
+
+API_KEY = _secret("ANTHROPIC_API_KEY")
+APP_PASSWORD = _secret("APP_PASSWORD")
+model = _secret("MODEL") or DEFAULT_MODEL
+use_web = True  # open roles and 90-day news depend on live search
 
 # --------------------------------------------------------------------------- #
-# Sidebar: access, model, resume, preferences
+# Password gate (fails closed: nothing renders without a configured password)
 # --------------------------------------------------------------------------- #
-with st.sidebar:
-    st.title("🧭 Research Agent")
-
-    owner_key = _secret("ANTHROPIC_API_KEY")
-    app_password = _secret("APP_PASSWORD")
-    st.subheader("Access")
-    user_key = st.text_input(
-        "Your Anthropic API key",
-        type="password",
-        help="Optional if the app owner configured one. Your key is only kept in this browser session.",
+if not APP_PASSWORD or not API_KEY:
+    st.title("🧭 Company Research Agent")
+    st.error(
+        "This app isn't configured yet. The owner needs to set both `ANTHROPIC_API_KEY` and "
+        "`APP_PASSWORD` in the app's secrets (Streamlit Cloud → App settings → Secrets, "
+        "or `.streamlit/secrets.toml` locally)."
     )
-    api_key = user_key.strip()
-    if not api_key and owner_key:
-        if app_password and not st.session_state.authed:
-            pw = st.text_input("App password", type="password", help="Ask the app owner, or use your own API key above.")
-            if pw and pw == app_password:
+    st.stop()
+
+if not st.session_state.authed:
+    _, mid, _ = st.columns([1, 1.2, 1])
+    with mid:
+        st.title("🧭 Company Research Agent")
+        st.caption("Private beta. Enter the password to continue.")
+        with st.form("login", border=True):
+            pw = st.text_input("Password", type="password")
+            ok = st.form_submit_button("Enter", type="primary", width="stretch")
+        if ok:
+            if hmac.compare_digest(pw.encode(), APP_PASSWORD.encode()):
                 st.session_state.authed = True
                 st.rerun()
-            elif pw:
-                st.error("Wrong password.")
-        if st.session_state.authed or not app_password:
-            api_key = owner_key
-            st.caption("✅ Using the app's configured API key.")
+            else:
+                time.sleep(1.5)  # slows down password guessing
+                st.error("Incorrect password.")
+    st.stop()
 
-    model_label = st.selectbox("Model", list(MODEL_OPTIONS), index=0)
-    model = MODEL_OPTIONS.get(model_label, DEFAULT_MODEL)
-    use_web = st.toggle("Live web research", value=True, help="Lets Claude search the web for open roles and news. Turn off for a faster, knowledge-only run (roles/news will be unreliable).")
+# --------------------------------------------------------------------------- #
+# Sidebar: resume, preferences
+# --------------------------------------------------------------------------- #
+api_key = API_KEY
+with st.sidebar:
+    st.title("🧭 Research Agent")
+    st.caption(f"🔒 Signed in · {MODEL_LABEL if model == DEFAULT_MODEL else model}")
+    if st.button("Log out", width="stretch"):
+        st.session_state.clear()
+        st.rerun()
 
     st.divider()
     st.subheader("Resume")
@@ -122,15 +140,12 @@ r_hash = resume_hash(resume_text)
 prefs_json = json.dumps(prefs, sort_keys=True)
 
 
-def get_llm() -> ResearchLLM | None:
-    if not api_key:
-        st.warning("Add an Anthropic API key in the sidebar to run the agent. Get one at console.anthropic.com.")
-        return None
+def get_llm() -> ResearchLLM:
     return ResearchLLM(api_key=api_key, model=model, use_web=use_web)
 
 
 def get_profile(llm: ResearchLLM) -> dict:
-    key = f"{r_hash}:{model}"
+    key = r_hash
     if key not in st.session_state.profiles:
         with st.spinner("Reading the resume…"):
             st.session_state.profiles[key] = build_profile(llm, resume_text)
@@ -188,7 +203,10 @@ def render_fit(r: dict) -> None:
     with c1:
         st.metric("Overall fit", f"{score}/100")
         st.markdown(f"### :{color}[{label}]")
-        st.caption("Weighted from the dimensions on the right, blended with your top role matches.")
+        weights = " · ".join(f"{LABELS[k]} {int(w * 100)}%" for k, w in WEIGHTS.items())
+        st.caption(f"{weights}. Blended 75/25 with your top role matches; capped at 70 if no qualifying roles are open.")
+        if fit.get("candidate_years") not in (None, ""):
+            st.caption(f"Your relevant experience: ~{fit['candidate_years']} yrs")
     with c2:
         st.write(fit.get("summary", ""))
         for k, v in (fit.get("breakdown") or {}).items():
@@ -224,7 +242,7 @@ def render_roles(r: dict) -> None:
             c1, c2 = st.columns([4, 1])
             with c1:
                 st.markdown(f"#### {role.get('title', 'Role')}")
-                meta = " · ".join(x for x in [role.get("team"), role.get("location"), role.get("remote"), role.get("seniority"), (f"posted {role['posted']}" if role.get("posted") else "")] if x)
+                meta = " · ".join(x for x in [role.get("team"), role.get("location"), role.get("remote"), role.get("seniority"), (f"{role['years_required']} yrs required" if role.get("years_required") else ""), (f"posted {role['posted']}" if role.get("posted") else "")] if x)
                 st.caption(meta)
             with c2:
                 ms = clamp(role.get("match_score"))
@@ -295,15 +313,21 @@ def render_prep(r: dict) -> None:
 
 def render_news(r: dict) -> None:
     news = r.get("news", [])
+    days = r.get("news_window_days", NEWS_WINDOW_DAYS)
+    summary = f"Past {days} days · {len(news)} item{'s' if len(news) != 1 else ''}, newest first"
+    if r.get("news_dropped_old"):
+        summary += f" · {r['news_dropped_old']} older item(s) filtered out"
+    st.caption(summary)
     if not news:
-        st.info("No recent news found.")
+        st.info(f"No news found from the past {days} days.")
     icon = {"positive": "🟢", "negative": "🔴", "neutral": "⚪"}
     for n in news:
         with st.container(border=True):
             title = n.get("headline", "")
             url = n.get("url", "")
             st.markdown(f"{icon.get(n.get('sentiment', 'neutral'), '⚪')} **[{title}]({url})**" if url else f"**{title}**")
-            st.caption(" · ".join(x for x in [n.get("date"), n.get("source")] if x))
+            when = "⚠️ date unverified" if n.get("date_unverified") else n.get("date")
+            st.caption(" · ".join(x for x in [when, n.get("source")] if x))
             st.write(n.get("summary", ""))
             if n.get("why_it_matters"):
                 st.markdown(f"**Why it matters to you:** {n['why_it_matters']}")
@@ -362,7 +386,7 @@ def render_result(r: dict) -> None:
         )
 
     t_fit, t_roles, t_prep, t_news, t_prod, t_src = st.tabs(
-        ["🎯 Fit score", f"💼 Open roles ({len(r.get('roles', []))})", "🧠 Interview prep", "📰 Recent news", "📦 Product", "🔗 Sources"]
+        ["🎯 Fit score", f"💼 Open roles ({len(r.get('roles', []))})", "🧠 Interview prep", f"📰 News, {NEWS_WINDOW_DAYS} days ({len(r.get('news', []))})", "📦 Product", "🔗 Sources"]
     )
     with t_fit:
         render_fit(r)
@@ -401,7 +425,7 @@ if view == NAV_DISCOVER:
         if llm:
             try:
                 profile = get_profile(llm)
-                with st.spinner("Searching for companies hiring people like you… (about a minute)"):
+                with st.spinner("Searching for companies hiring people like you… (30–60 seconds)"):
                     st.session_state.suggestions = suggest_companies(
                         llm, profile, resume_text, prefs, n=n, exclude=[x.strip() for x in exclude.split(",") if x.strip()]
                     )
@@ -472,7 +496,7 @@ elif view == NAV_RESEARCH:
     if st.session_state.active_key and st.session_state.active_key in st.session_state.research:
         render_result(st.session_state.research[st.session_state.active_key])
     else:
-        st.info("Type a company name to get a fit score, open roles you qualify for, interview prep, recent news, and a product overview.")
+        st.info("Type a company name to get a fit score, open roles you qualify for, interview prep, news from the past 90 days, and a product overview.")
 
 # ----- Profile ------------------------------------------------------------- #
 else:

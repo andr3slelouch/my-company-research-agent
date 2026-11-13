@@ -13,7 +13,10 @@ from agent import prompts  # noqa: E402
 from agent.jsonutil import JSONExtractionError, extract_json  # noqa: E402
 from agent.report import to_markdown  # noqa: E402
 from agent.resume import extract_text, load_sample, resume_hash  # noqa: E402
-from agent.scoring import compute_overall, label_for  # noqa: E402
+from agent.scoring import WEIGHTS, compute_overall, label_for  # noqa: E402
+from agent.news import filter_recent_news, parse_news_date  # noqa: E402
+from agent.llm import DEFAULT_MODEL  # noqa: E402
+from datetime import date  # noqa: E402
 
 
 # ---------- JSON extraction ----------
@@ -42,7 +45,7 @@ def test_extract_failure():
 
 
 # ---------- Scoring ----------
-BREAKDOWN = {k: {"score": 80, "evidence": "x"} for k in ("skills", "tech_stack", "experience_level", "domain", "location_logistics")}
+BREAKDOWN = {k: {"score": 80, "evidence": "x"} for k in ("skills", "years_experience", "domain")}
 
 
 def test_overall_without_roles_is_capped():
@@ -56,7 +59,7 @@ def test_overall_blends_top_roles():
 
 
 def test_overall_handles_bad_values():
-    bd = {"skills": {"score": "abc"}, "tech_stack": 150, "experience_level": None}
+    bd = {"skills": {"score": "abc"}, "years_experience": 150, "domain": None}
     s = compute_overall(bd, [{"match_score": "90"}])
     assert 0 <= s <= 100
 
@@ -125,3 +128,68 @@ def test_markdown_report():
     for needle in ("Fit score: 77/100", "Backend Engineer", "Design a cache", "Acme raises", "Globex", "Sources"):
         assert needle in md
     json.dumps(result)  # result stays JSON-serializable
+
+
+# ---------- Spec: Haiku, 3-dimension scoring ----------
+def test_model_is_haiku():
+    assert DEFAULT_MODEL == "claude-haiku-5-5"
+
+
+def test_weights_are_skills_domain_years():
+    assert WEIGHTS == {"skills": 0.50, "years_experience": 0.25, "domain": 0.25}
+
+
+def test_skills_weigh_double():
+    roles = [{"match_score": 50}]
+    strong_skills = {"skills": {"score": 100}, "years_experience": {"score": 0}, "domain": {"score": 50}}
+    strong_years = {"skills": {"score": 0}, "years_experience": {"score": 100}, "domain": {"score": 50}}
+    assert compute_overall(strong_skills, roles) > compute_overall(strong_years, roles)
+
+
+def test_unknown_dimensions_ignored():
+    bd = {**BREAKDOWN, "location_logistics": {"score": 0}}
+    assert compute_overall(bd, []) == compute_overall(BREAKDOWN, [])
+
+
+# ---------- 90-day news window ----------
+TODAY = date(2026, 11, 13)  # cutoff = 2026-08-15
+
+
+def test_parse_formats():
+    assert parse_news_date("2026-10-01") == date(2026, 10, 1)
+    assert parse_news_date("Oct 5, 2026") == date(2026, 10, 5)
+    assert parse_news_date("2026-10-01T12:00:00Z") == date(2026, 10, 1)
+    assert parse_news_date("August 2026") == date(2026, 8, 31)
+    assert parse_news_date("last week") is None
+
+
+def test_news_window_filters_sorts_and_flags():
+    items = [
+        {"headline": "Old", "date": "2026-08-14"},           # 91 days -> dropped
+        {"headline": "Edge", "date": "2026-08-15"},          # exactly 90 -> kept
+        {"headline": "New", "date": "November 10, 2026"},
+        {"headline": "Month only", "date": "2026-09"},
+        {"headline": "No date"},
+        {"headline": "Future", "date": "2027-01-01"},
+        {"headline": "New", "date": "2026-11-10"},           # duplicate headline
+    ]
+    kept, dropped = filter_recent_news(items, today=TODAY)
+    heads = [i["headline"] for i in kept]
+    assert dropped == 1
+    assert heads[:3] == ["New", "Month only", "Edge"]
+    assert kept[0]["date"] == "2026-11-10"
+    assert kept[1]["date"] == "2026-09"            # not shown as a fake exact day
+    assert set(heads[3:]) == {"No date", "Future"}
+    assert all(i["date_unverified"] for i in kept[3:])
+    assert "Old" not in heads
+
+
+def test_news_cap():
+    items = [{"headline": f"n{i}", "date": f"2026-11-{(i % 12) + 1:02d}"} for i in range(30)]
+    kept, _ = filter_recent_news(items, today=TODAY)
+    assert len(kept) == 15
+
+
+def test_company_prompt_states_cutoff():
+    p = prompts.company_prompt("Acme", {}, {})
+    assert "90 days" in p and "up to 15" in p

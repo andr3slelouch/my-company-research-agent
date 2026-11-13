@@ -9,20 +9,19 @@ from __future__ import annotations
 from typing import Any
 
 WEIGHTS: dict[str, float] = {
-    "skills": 0.30,             # hard-skill overlap with open roles
-    "tech_stack": 0.20,         # languages / frameworks / infra the company uses
-    "experience_level": 0.20,   # seniority & years vs. what roles ask for
-    "domain": 0.10,             # industry / problem-space familiarity
-    "location_logistics": 0.20, # location, remote policy, work authorization, language
+    "skills": 0.50,            # hard-skill overlap with what the open roles require
+    "years_experience": 0.25,  # candidate's years vs. years the roles ask for
+    "domain": 0.25,            # industry / problem-space familiarity
 }
 
 LABELS = {
-    "skills": "Skills match",
-    "tech_stack": "Tech stack overlap",
-    "experience_level": "Experience level",
-    "domain": "Domain familiarity",
-    "location_logistics": "Location & logistics",
+    "skills": "Skill match",
+    "years_experience": "Years of experience required",
+    "domain": "Domain match",
 }
+
+ROLE_BLEND = 0.25      # share of the overall score that comes from top role matches
+NO_ROLES_CAP = 70      # max overall score when no qualifying roles are open
 
 
 def clamp(v: Any, lo: int = 0, hi: int = 100) -> int:
@@ -39,11 +38,11 @@ def _dim_score(entry: Any) -> int:
 
 
 def compute_overall(breakdown: dict[str, Any], roles: list[dict] | None = None) -> int:
-    """Weighted average of dimensions, nudged by the best role matches.
+    """Weighted average of the three dimensions, blended with the best role matches.
 
-    If qualifying roles exist, blend 75% dimension score + 25% mean of top-3 role
-    match scores. If no roles were found, cap at 70: a company with nothing open
-    for you is not a top fit *right now*, however good the culture match.
+    If qualifying roles exist: 75% dimension score + 25% mean of the top-3 role
+    match scores. If none were found, cap at 70: a company with nothing open for
+    you is not a top fit *right now*.
     """
     total_w = 0.0
     acc = 0.0
@@ -55,9 +54,9 @@ def compute_overall(breakdown: dict[str, Any], roles: list[dict] | None = None) 
 
     role_scores = sorted((clamp(r.get("match_score")) for r in (roles or [])), reverse=True)[:3]
     if role_scores:
-        overall = 0.75 * base + 0.25 * (sum(role_scores) / len(role_scores))
+        overall = (1 - ROLE_BLEND) * base + ROLE_BLEND * (sum(role_scores) / len(role_scores))
     else:
-        overall = min(base, 70.0)
+        overall = min(base, float(NO_ROLES_CAP))
     return clamp(overall)
 
 

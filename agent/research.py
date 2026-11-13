@@ -7,6 +7,7 @@ from typing import Any, Callable
 
 from . import prompts
 from .llm import LLMResult, ResearchLLM
+from .news import NEWS_WINDOW_DAYS, filter_recent_news
 from .scoring import compute_overall
 
 Progress = Callable[[str], None]
@@ -35,8 +36,8 @@ def suggest_companies(
     res = llm.run_json(
         prompts.discover_prompt(profile, resume_text, prefs, n, exclude or []),
         prompts.system_prompt(),
-        max_tokens=8000,
-        max_searches=8,
+        max_tokens=6000,
+        max_searches=5,
     )
     data = res.data if isinstance(res.data, dict) else {"companies": res.data}
     companies = data.get("companies") or []
@@ -54,15 +55,15 @@ def research_company(
             llm.run_json,
             prompts.company_prompt(company, profile, prefs),
             prompts.system_prompt(),
-            max_tokens=8000,
-            max_searches=6,
+            max_tokens=7000,
+            max_searches=5,
         )
         f_roles = pool.submit(
             llm.run_json,
             prompts.roles_prompt(company, profile, resume_text, prefs),
             prompts.system_prompt(),
-            max_tokens=10000,
-            max_searches=8,
+            max_tokens=7000,
+            max_searches=5,
         )
         company_res: LLMResult = f_company.result()
         roles_res: LLMResult = f_roles.result()
@@ -72,6 +73,9 @@ def research_company(
     roles = sorted(roles_data.get("roles") or [], key=lambda r: r.get("match_score", 0) or 0, reverse=True)
     roles_data["roles"] = roles
 
+    news, news_dropped = filter_recent_news(company_data.get("news") or [])
+    company_data["news"] = news  # interview prep only sees in-window news
+
     fit = roles_data.get("fit") or {}
     fit["overall"] = compute_overall(fit.get("breakdown") or {}, roles)
 
@@ -79,8 +83,8 @@ def research_company(
     prep_res = llm.run_json(
         prompts.prep_prompt(company, profile, resume_text, company_data, roles_data),
         prompts.system_prompt(),
-        max_tokens=10000,
-        max_searches=3,
+        max_tokens=7000,
+        max_searches=2,
     )
     prep = prep_res.data if isinstance(prep_res.data, dict) else {}
 
@@ -89,7 +93,9 @@ def research_company(
         "query": company,
         "company": company_data.get("company") or {"name": company},
         "product": company_data.get("product") or {},
-        "news": company_data.get("news") or [],
+        "news": news,
+        "news_dropped_old": news_dropped,
+        "news_window_days": NEWS_WINDOW_DAYS,
         "roles": roles,
         "roles_reviewed": roles_data.get("roles_reviewed"),
         "hiring_notes": roles_data.get("hiring_notes", ""),

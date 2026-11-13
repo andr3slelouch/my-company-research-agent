@@ -44,7 +44,10 @@ def to_markdown(r: dict[str, Any], candidate: str = "") -> str:
         out.append("_No qualifying open roles found._")
     for role in roles:
         out.append(f"### [{role.get('title')}]({role.get('url', '')}) — match {role.get('match_score', '?')}/100")
-        out.append(f"{role.get('location', '')} · {role.get('remote', '')} · {role.get('seniority', '')}")
+        meta = [role.get("location"), role.get("remote"), role.get("seniority")]
+        if role.get("years_required"):
+            meta.append(f"{role['years_required']} yrs required")
+        out.append(" · ".join(m for m in meta if m))
         out.append(f"\n{role.get('why_you_fit', '')}")
         if role.get("gaps"):
             out.append("\nGaps: " + "; ".join(role["gaps"]))
@@ -70,9 +73,10 @@ def to_markdown(r: dict[str, Any], candidate: str = "") -> str:
         for d in prep["prep_plan"]:
             out.append(f"- **{d.get('day')}: {d.get('focus')}** — " + "; ".join(d.get("tasks", [])))
 
-    out.append("\n## Recent news\n")
+    out.append(f"\n## Recent news (past {r.get('news_window_days', 90)} days)\n")
     for n in r.get("news", []):
-        out.append(f"- **{n.get('date', '')}** [{n.get('headline')}]({n.get('url', '')}) ({n.get('source', '')})  \n  {n.get('summary', '')}  \n  _Why it matters:_ {n.get('why_it_matters', '')}")
+        when = "date unverified" if n.get("date_unverified") else n.get("date", "")
+        out.append(f"- **{when}** [{n.get('headline')}]({n.get('url', '')}) ({n.get('source', '')})  \n  {n.get('summary', '')}  \n  _Why it matters:_ {n.get('why_it_matters', '')}")
     if not r.get("news"):
         out.append("_No recent news found._")
 

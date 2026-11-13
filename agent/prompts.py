@@ -6,6 +6,8 @@ import json
 from datetime import date
 from typing import Any
 
+from .news import MAX_NEWS_ITEMS, NEWS_WINDOW_DAYS, news_cutoff
+
 
 def system_prompt() -> str:
     today = date.today().isoformat()
@@ -15,7 +17,7 @@ Today's date is {today}.
 Rules:
 - Ground company facts, open roles and news in web search results whenever web search is available. Prefer primary sources: the company's careers page / ATS (Greenhouse, Lever, Ashby, Workday, SmartRecruiters), newsroom, engineering blog, and reputable press.
 - NEVER invent job postings, URLs, dates, funding figures or quotes. If you cannot verify something, omit it or say it is unverified. An empty list is better than a fabricated one.
-- Only include news from roughly the last 12 months, newest first, and give dates as YYYY-MM-DD when known (YYYY-MM if only the month is known).
+- Only include news published in the last {NEWS_WINDOW_DAYS} days (on or after {news_cutoff().isoformat()}), newest first. Give dates as YYYY-MM-DD; use YYYY-MM only if the day is truly unknown. Never guess a date.
 - Be candid about gaps. A useful honest assessment beats flattery.
 - Tie every recommendation back to concrete evidence from the candidate's resume.
 - Finish your reply with exactly one JSON object inside a ```json code fence that matches the requested schema. No comments inside the JSON."""
@@ -105,7 +107,7 @@ Return JSON:
   ]
 }}
 ```
-estimated_fit is 0-100."""
+estimated_fit is 0-100, judged on three things only: skill match (50%), years of experience vs. what their roles require (25%), and domain match (25%)."""
 
 
 def company_prompt(company: str, profile: dict, prefs: dict) -> str:
@@ -116,7 +118,9 @@ Candidate snapshot (to judge relevance of news):
 Preferences:
 {_prefs_block(prefs)}
 
-Find: what the company does and sells, its main products, customers, business model, competitors, engineering stack/tech signals (engineering blog, job posts, GitHub), and the most relevant recent news (funding, earnings, layoffs, hiring freezes, acquisitions, leadership changes, product launches, AI initiatives, office/remote policy changes). For each news item explain why it matters to THIS job seeker (e.g. hiring momentum, team stability, tech direction, interview talking point).
+Find: what the company does and sells, its main products, customers, business model, competitors, and engineering stack/tech signals (engineering blog, job posts, GitHub).
+
+NEWS: Gather ALL notable news about the company published in the last {NEWS_WINDOW_DAYS} days, i.e. on or after {news_cutoff().isoformat()} (today is {date.today().isoformat()}). Search with recency terms (e.g. "{company} news {date.today().strftime('%B %Y')}", "{company} announces", "{company} layoffs OR hiring OR funding OR acquisition", the company newsroom/press page). Cover: funding/earnings, layoffs or hiring freezes, hiring expansions, acquisitions, leadership changes, product launches, AI initiatives, office/remote policy changes, legal/regulatory events. Exclude anything older than the cutoff even if it is important. For each item explain why it matters to THIS job seeker (hiring momentum, team stability, tech direction, interview talking point). If you find nothing in the window, return an empty news list.
 
 If the name is ambiguous, pick the most likely company for a software-engineering job seeker and state the assumption in "disambiguation".
 
@@ -145,7 +149,7 @@ Return JSON:
   ]
 }}
 ```
-Return 4-8 news items when available."""
+Return up to {MAX_NEWS_ITEMS} news items, newest first, one item per distinct story (merge duplicate coverage)."""
 
 
 def roles_prompt(company: str, profile: dict, resume_text: str, prefs: dict) -> str:
@@ -165,12 +169,12 @@ Method:
 1. Search the company's careers page and ATS boards (e.g. "site:boards.greenhouse.io {company}", "site:jobs.lever.co {company}", "site:jobs.ashbyhq.com {company}", "{company} careers software engineer"). Also note the general tech stack and seniority mix you see in postings.
 2. Include roles where the candidate meets most core requirements or is a credible stretch (at most one level above their seniority). Skip roles that are clearly far out of reach or unrelated, but count them in roles_reviewed.
 3. Only list postings you actually found. Each needs a real URL. If nothing qualifying is open, return an empty roles list and explain in hiring_notes, including which role families to watch.
-4. Score each fit dimension 0-100 with one sentence of evidence:
-   - skills: hard-skill overlap with what the roles require
-   - tech_stack: overlap with the company's languages / frameworks / infra
-   - experience_level: candidate's years & seniority vs. what roles ask
-   - domain: familiarity with the company's industry / problem space
-   - location_logistics: location, remote policy, work authorization, language requirements vs. candidate & preferences
+4. For each role, record the years of experience the posting requires (years_required, e.g. "3+", "2-5", or "not stated").
+5. Score exactly three fit dimensions 0-100, each with one sentence of evidence:
+   - skills: how well the candidate's hard skills (languages, frameworks, databases, tools) match what the roles require. 90+ = meets nearly all required skills; 50 = about half.
+   - years_experience: candidate's total relevant years vs. the years the roles require. Meets or exceeds the typical requirement = 85-100; 1 year short = ~65; 2 years short = ~45; 3+ years short = below 30. If no posting states years, judge from the seniority level and say so.
+   - domain: familiarity with the company's industry and problem space (e.g. payments, HR tech, healthcare, dev tools), based on resume evidence. Transferable-but-not-direct experience = 50-70.
+   Do not factor location, remote policy or work authorization into these scores; mention them in hiring_notes instead.
 
 Return JSON:
 ```json
@@ -178,7 +182,7 @@ Return JSON:
   "roles": [
     {{
       "title": "string", "team": "string", "location": "string", "remote": "remote | hybrid | onsite | unknown",
-      "seniority": "string", "url": "https://...", "posted": "YYYY-MM-DD or empty",
+      "seniority": "string", "years_required": "e.g. 3+ / not stated", "url": "https://...", "posted": "YYYY-MM-DD or empty",
       "match_score": 0,
       "requirements_met": ["..."],
       "gaps": ["..."],
@@ -186,15 +190,14 @@ Return JSON:
     }}
   ],
   "roles_reviewed": 0,
-  "hiring_notes": "hiring momentum, freezes, sponsorship policy if known, roles to watch",
+  "hiring_notes": "hiring momentum, freezes, location/remote and sponsorship policy if known, roles to watch",
   "fit": {{
     "breakdown": {{
       "skills": {{"score": 0, "evidence": "string"}},
-      "tech_stack": {{"score": 0, "evidence": "string"}},
-      "experience_level": {{"score": 0, "evidence": "string"}},
-      "domain": {{"score": 0, "evidence": "string"}},
-      "location_logistics": {{"score": 0, "evidence": "string"}}
+      "years_experience": {{"score": 0, "evidence": "e.g. Roles ask for 3-5 yrs; candidate has ~3"}},
+      "domain": {{"score": 0, "evidence": "string"}}
     }},
+    "candidate_years": 0,
     "summary": "3-4 sentence honest verdict",
     "strengths": ["specific selling points for this company"],
     "gaps": ["specific gaps"],
@@ -234,7 +237,7 @@ Target roles found:
 You may search the web for this company's known interview process (e.g. Glassdoor, Blind, levels.fyi, company engineering blog) if it helps; label anything unverified as "reported".
 
 Requirements:
-- 12-16 likely interview questions across categories: Behavioral, Technical, System design, Coding, Company/motivation. Make them specific to the company's products, stack and the target roles, not generic.
+- 12-15 likely interview questions across categories: Behavioral, Technical, System design, Coding, Company/motivation. Make them specific to the company's products, stack and the target roles, not generic.
 - For each question give a short answer strategy that points to a specific resume experience (e.g. a STAR outline referencing a real project from the resume).
 - Talking points must map a company need to resume evidence.
 - Include smart questions for the candidate to ask, informed by recent news.
