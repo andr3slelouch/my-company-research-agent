@@ -24,6 +24,36 @@ MIN_MAX_TOKENS = 16000
 # "low" effort = shorter thinking: cheaper and faster, plenty for research/extraction.
 EFFORT = "low"
 
+# USD per million tokens (input, output), for the on-screen cost estimate only.
+# Verify at https://claude.com/pricing. Haiku 5.5 rates apply to prompts up to 100K tokens.
+PRICES: dict[str, tuple[float, float]] = {
+    "claude-haiku-5-5": (0.10, 0.50),
+    "claude-sonnet-5-5": (2.00, 10.00),
+    "claude-opus-5-5": (4.00, 20.00),
+}
+PRICE_PER_SEARCH = 0.01  # $10 per 1,000 web searches
+
+
+def new_usage() -> dict[str, int]:
+    return {"input_tokens": 0, "output_tokens": 0, "searches": 0}
+
+
+def add_usage(*usages: dict[str, int]) -> dict[str, int]:
+    total = new_usage()
+    for u in usages:
+        for k in total:
+            total[k] += int((u or {}).get(k, 0) or 0)
+    return total
+
+
+def cost_of(usage: dict[str, int], model: str = DEFAULT_MODEL) -> float:
+    p_in, p_out = PRICES.get(model, PRICES[DEFAULT_MODEL])
+    return (
+        usage.get("input_tokens", 0) / 1e6 * p_in
+        + usage.get("output_tokens", 0) / 1e6 * p_out
+        + usage.get("searches", 0) * PRICE_PER_SEARCH
+    )
+
 
 @dataclass
 class LLMResult:
@@ -31,6 +61,7 @@ class LLMResult:
     sources: list[dict[str, str]] = field(default_factory=list)
     raw_text: str = ""
     searches: int = 0
+    usage: dict[str, int] = field(default_factory=new_usage)
 
 
 class LLMError(RuntimeError):
@@ -69,6 +100,7 @@ class ResearchLLM:
         texts: list[str] = []
         sources: dict[str, dict[str, str]] = {}
         searches = 0
+        usage = new_usage()
         max_tokens = max(max_tokens, MIN_MAX_TOKENS)
         stop_reason = None
 
@@ -86,6 +118,7 @@ class ResearchLLM:
             except self._anthropic.APIConnectionError as e:
                 raise LLMError(f"Could not reach the Anthropic API: {e}") from e
 
+            self._add_resp_usage(usage, resp)
             for block in resp.content:
                 btype = getattr(block, "type", "")
                 if btype == "text":
@@ -121,11 +154,22 @@ class ResearchLLM:
         try:
             data = extract_json(raw)
         except JSONExtractionError:
-            data = self._repair_json(raw, max_tokens)
-        return LLMResult(data=data, sources=list(sources.values()), raw_text=raw, searches=searches)
+            data = self._repair_json(raw, max_tokens, usage)
+        return LLMResult(data=data, sources=list(sources.values()), raw_text=raw, searches=searches, usage=usage)
 
     # ------------------------------------------------------------------ #
-    def _repair_json(self, raw: str, max_tokens: int) -> Any:
+    @staticmethod
+    def _add_resp_usage(usage: dict[str, int], resp: Any) -> None:
+        u = getattr(resp, "usage", None)
+        if u is None:
+            return
+        usage["input_tokens"] += (getattr(u, "input_tokens", 0) or 0) + (getattr(u, "cache_read_input_tokens", 0) or 0)
+        usage["output_tokens"] += getattr(u, "output_tokens", 0) or 0
+        stu = getattr(u, "server_tool_use", None)
+        if stu is not None:
+            usage["searches"] += getattr(stu, "web_search_requests", 0) or 0
+
+    def _repair_json(self, raw: str, max_tokens: int, usage: dict[str, int]) -> Any:
         """One cheap retry: ask the model to re-emit its answer as valid JSON."""
         if not raw.strip():
             raise LLMError("The model returned no text. Try again or switch models.")
@@ -136,6 +180,7 @@ class ResearchLLM:
             system="You convert text into one valid JSON object. Output only JSON, no prose, no code fences.",
             messages=[{"role": "user", "content": f"Convert this into the single JSON object it describes:\n\n{raw[-30000:]}"}],
         )
+        self._add_resp_usage(usage, resp)
         text = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
         try:
             return extract_json(text)

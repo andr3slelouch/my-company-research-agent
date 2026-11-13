@@ -1,13 +1,56 @@
-"""Enforce the recent-news window in code, independent of what the model returns."""
+"""News: free Google News RSS headlines, plus a recent-news window enforced in code."""
 
 from __future__ import annotations
 
 import calendar
+import urllib.parse
+import urllib.request
+import xml.etree.ElementTree as ET
 from datetime import date, datetime, timedelta
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 NEWS_WINDOW_DAYS = 90
 MAX_NEWS_ITEMS = 15
+RSS_HEADLINES_TO_RANK = 40  # headlines sent to Claude to pick from
+
+
+def parse_rss(xml_bytes: bytes) -> list[dict[str, Any]]:
+    """Parse a Google News RSS document into news items (headline, url, source, date)."""
+    root = ET.fromstring(xml_bytes)
+    items = []
+    for it in root.iter("item"):
+        try:
+            published = parsedate_to_datetime(it.findtext("pubDate", ""))
+        except (TypeError, ValueError):
+            published = None
+        title = (it.findtext("title") or "").strip()
+        source = (it.findtext("source") or "").strip()
+        if source and title.endswith(f" - {source}"):
+            title = title[: -len(source) - 3]  # Google appends " - Publisher"
+        if title:
+            items.append({
+                "headline": title,
+                "url": (it.findtext("link") or "").strip(),
+                "source": source,
+                "date": published.date().isoformat() if published else "",
+            })
+    return items
+
+
+def fetch_google_news(company: str, days: int = NEWS_WINDOW_DAYS, timeout: int = 10) -> list[dict[str, Any]]:
+    """Free headlines from the Google News RSS feed, newest first. Empty list on any failure
+    (the feed is unofficial and can block cloud servers; callers fall back to web search)."""
+    q = urllib.parse.quote(f'"{company}" when:{days}d')
+    url = f"https://news.google.com/rss/search?q={q}&hl=en-US&gl=US&ceid=US:en"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            items = parse_rss(r.read())
+    except Exception:  # noqa: BLE001 - network, HTTP or XML errors all mean "no free news"
+        return []
+    kept, _ = filter_recent_news(items, days=days, limit=RSS_HEADLINES_TO_RANK)
+    return kept
 
 _FULL_FORMATS = ("%Y-%m-%d", "%Y/%m/%d", "%B %d, %Y", "%b %d, %Y", "%d %B %Y", "%d %b %Y", "%m/%d/%Y")
 _MONTH_FORMATS = ("%Y-%m", "%B %Y", "%b %Y")

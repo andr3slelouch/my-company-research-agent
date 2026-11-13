@@ -13,10 +13,10 @@ import time
 
 import streamlit as st
 
-from agent.llm import DEFAULT_MODEL, MODEL_LABEL, LLMError, ResearchLLM
+from agent.llm import DEFAULT_MODEL, MODEL_LABEL, LLMError, ResearchLLM, cost_of
 from agent.news import NEWS_WINDOW_DAYS
 from agent.report import to_markdown
-from agent.research import build_profile, research_company, suggest_companies
+from agent.research import build_profile, prep_for_role, research_company, suggest_companies
 from agent.resume import extract_text, load_sample, resume_hash
 from agent.scoring import LABELS, WEIGHTS, clamp, label_for
 
@@ -24,6 +24,7 @@ st.set_page_config(page_title="Company Research Agent", page_icon="🧭", layout
 
 NAV_DISCOVER = "🔎 Discover companies"
 NAV_RESEARCH = "🏢 Research a company"
+NAV_PASTE = "📋 Paste a job description"
 NAV_PROFILE = "📄 My profile"
 
 # --------------------------------------------------------------------------- #
@@ -37,6 +38,8 @@ defaults = {
     "active_key": None,
     "pending_company": None,
     "suggestions": None,
+    "role_preps": {},      # role key -> (prep, usage)
+    "session_cost": 0.0,   # estimated USD spent this session
     "authed": False,
 }
 for k, v in defaults.items():
@@ -133,6 +136,9 @@ with st.sidebar:
         "other": p_other.strip(),
     }
 
+    st.divider()
+    spend_slot = st.empty()  # filled at the end of the run, after any new spend
+
 # --------------------------------------------------------------------------- #
 # Helpers
 # --------------------------------------------------------------------------- #
@@ -152,9 +158,22 @@ def get_profile(llm: ResearchLLM) -> dict:
     return st.session_state.profiles[key]
 
 
-def research_key(company: str) -> str:
-    raw = f"{company.strip().lower()}|{r_hash}|{model}|{use_web}|{prefs_json}"
+def research_key(company: str, extra: str = "") -> str:
+    raw = f"{company.strip().lower()}|{extra}|{r_hash}|{model}|{use_web}|{prefs_json}"
     return hashlib.sha256(raw.encode()).hexdigest()[:20]
+
+
+def spend(usage: dict | None) -> float:
+    """Add a call's estimated cost to the session total and return it."""
+    c = cost_of(usage or {}, model)
+    st.session_state.session_cost += c
+    return c
+
+
+def usage_line(usage: dict | None) -> str:
+    u = usage or {}
+    return (f"Estimated cost ${cost_of(u, model):.3f} · {u.get('input_tokens', 0):,} in / "
+            f"{u.get('output_tokens', 0):,} out tokens · {u.get('searches', 0)} web searches")
 
 
 def go_research(company: str) -> None:
@@ -163,23 +182,31 @@ def go_research(company: str) -> None:
     st.session_state.nav = NAV_RESEARCH
 
 
-def run_research(company: str) -> None:
+def run_research(company: str, slug: str | None = None, pasted_role: dict | None = None) -> None:
     llm = get_llm()
     if not llm:
         return
-    key = research_key(company)
-    if key in st.session_state.research:
+    extra = f"slug={slug or ''}"
+    if pasted_role:
+        extra = "jd=" + hashlib.sha256(pasted_role["description"].encode()).hexdigest()[:12]
+    key = research_key(company, extra)
+    if key in st.session_state.research:  # same company again: no second charge
         st.session_state.active_key = key
         st.session_state.history_pick = key  # safe: selectbox renders later in the run
         return
     try:
         profile = get_profile(llm)
         with st.status(f"Researching **{company}**…", expanded=True) as status:
-            result = research_company(llm, company, profile, resume_text, prefs, progress=status.write)
+            result = research_company(
+                llm, company, profile, resume_text, prefs, progress=status.write,
+                slug=slug, pasted_role=pasted_role,
+            )
             status.update(label=f"Research on **{company}** complete", state="complete", expanded=False)
     except LLMError as e:
         st.error(str(e))
         return
+    spend(result.get("usage"))
+    result["key"] = key
     result["candidate"] = profile.get("name", "")
     st.session_state.research[key] = result
     if key not in st.session_state.history:
@@ -230,14 +257,54 @@ def render_fit(r: dict) -> None:
             st.markdown(f"- {s}")
 
 
+def render_role_prep(r: dict, role: dict, idx: int) -> None:
+    """'Prep for this role' button + cached result (no web search, ~1 cent on Haiku)."""
+    company = r.get("company", {}).get("name") or r.get("query", "")
+    key = f"{r.get('key', r.get('query'))}:{role.get('url') or role.get('title')}"
+    if key not in st.session_state.role_preps:
+        if not st.button("🎯 Prep for this role", key=f"prep_{idx}_{key}"):
+            return
+        llm = get_llm()
+        try:
+            with st.spinner("Mapping the job's requirements to your resume…"):
+                data, usage = prep_for_role(llm, company, get_profile(llm), resume_text, role)
+        except LLMError as e:
+            st.error(str(e))
+            return
+        spend(usage)
+        st.session_state.role_preps[key] = (data, usage)
+    data, usage = st.session_state.role_preps[key]
+    icons = {"strong": "✅", "partial": "🟡", "gap": "❌"}
+    with st.expander("🎯 Role-specific prep", expanded=True):
+        st.markdown("**Requirements vs. your resume**")
+        for q in data.get("requirement_map", []):
+            st.markdown(f"{icons.get(str(q.get('strength', '')).strip(), '•')} **{q.get('requirement', '')}**: {q.get('evidence', '')}")
+        if data.get("gap_plan"):
+            st.markdown("**Handling the gaps**")
+            for g in data["gap_plan"]:
+                st.markdown(f"- {g}")
+        if data.get("questions"):
+            st.markdown("**Role-specific questions**")
+            for q in data["questions"]:
+                st.markdown(f"- **{q.get('question', '')}**  \n  {q.get('how_to_answer', '')}")
+        if data.get("pitch"):
+            st.markdown("**Your 60-second pitch for this role**")
+            st.info(data["pitch"])
+        st.caption(usage_line(usage))
+
+
 def render_roles(r: dict) -> None:
     roles = r.get("roles", [])
     reviewed = r.get("roles_reviewed")
-    if reviewed:
+    src = (r.get("data_sources") or {}).get("roles")
+    if src:
+        st.caption(f"Source: {src}")
+    if reviewed and not r.get("pasted"):
         st.caption(f"Reviewed ~{reviewed} postings; showing the ones you realistically qualify for.")
     if not roles:
-        st.info("No qualifying open roles were found right now.")
-    for role in roles:
+        st.info("No qualifying open roles were found right now. "
+                "If the company uses Workday or its own careers site, try **📋 Paste a job description**.")
+    for idx, role in enumerate(roles):
         with st.container(border=True):
             c1, c2 = st.columns([4, 1])
             with c1:
@@ -255,8 +322,9 @@ def render_roles(r: dict) -> None:
             with m2:
                 if role.get("gaps"):
                     st.markdown("**Gaps:** " + "; ".join(role["gaps"]))
-            if role.get("url", "").startswith("http"):
+            if str(role.get("url", "")).startswith("http"):
                 st.link_button("View posting ↗", role["url"])
+            render_role_prep(r, role, idx)
     if r.get("hiring_notes"):
         st.markdown(f"**Hiring notes:** {r['hiring_notes']}")
 
@@ -318,6 +386,9 @@ def render_news(r: dict) -> None:
     if r.get("news_dropped_old"):
         summary += f" · {r['news_dropped_old']} older item(s) filtered out"
     st.caption(summary)
+    src = (r.get("data_sources") or {}).get("news")
+    if src:
+        st.caption(f"Source: {src}")
     if not news:
         st.info(f"No news found from the past {days} days.")
     icon = {"positive": "🟢", "negative": "🔴", "neutral": "⚪"}
@@ -385,8 +456,9 @@ def render_result(r: dict) -> None:
             width="stretch",
         )
 
+    roles_tab = "💼 Your role" if r.get("pasted") else f"💼 Open roles ({len(r.get('roles', []))})"
     t_fit, t_roles, t_prep, t_news, t_prod, t_src = st.tabs(
-        ["🎯 Fit score", f"💼 Open roles ({len(r.get('roles', []))})", "🧠 Interview prep", f"📰 News, {NEWS_WINDOW_DAYS} days ({len(r.get('news', []))})", "📦 Product", "🔗 Sources"]
+        ["🎯 Fit score", roles_tab, "🧠 Interview prep", f"📰 News, {NEWS_WINDOW_DAYS} days ({len(r.get('news', []))})", "📦 Product", "🔗 Sources"]
     )
     with t_fit:
         render_fit(r)
@@ -400,6 +472,9 @@ def render_result(r: dict) -> None:
         render_product(r)
     with t_src:
         srcs = r.get("sources", [])
+        for label, v in (r.get("data_sources") or {}).items():
+            st.markdown(f"**{label.title()}:** {v}")
+        st.caption(usage_line(r.get("usage")))
         st.caption(f"{r.get('searches', 0)} web searches · {len(srcs)} sources")
         for s in srcs:
             st.markdown(f"- [{s.get('title') or s['url']}]({s['url']})")
@@ -410,7 +485,24 @@ def render_result(r: dict) -> None:
 # --------------------------------------------------------------------------- #
 st.title("Company Research Agent")
 st.caption("Find companies that fit your resume, then get a fit score, matching open roles, interview prep, relevant news, and a product overview.")
-view = st.radio("View", [NAV_DISCOVER, NAV_RESEARCH, NAV_PROFILE], key="nav", horizontal=True, label_visibility="collapsed")
+view = st.radio("View", [NAV_DISCOVER, NAV_RESEARCH, NAV_PASTE, NAV_PROFILE], key="nav", horizontal=True, label_visibility="collapsed")
+
+
+def show_active_result() -> bool:
+    if len(st.session_state.history) > 1:
+        names = {k: st.session_state.research[k].get("company", {}).get("name") or st.session_state.research[k]["query"] for k in st.session_state.history}
+        if st.session_state.get("history_pick") not in names:
+            st.session_state.history_pick = st.session_state.active_key
+        st.session_state.active_key = st.selectbox(
+            "Previously researched",
+            st.session_state.history[::-1],
+            key="history_pick",
+            format_func=lambda k: names[k] + (" (pasted role)" if st.session_state.research[k].get("pasted") else ""),
+        )
+    if st.session_state.active_key and st.session_state.active_key in st.session_state.research:
+        render_result(st.session_state.research[st.session_state.active_key])
+        return True
+    return False
 
 # ----- Discover ------------------------------------------------------------ #
 if view == NAV_DISCOVER:
@@ -429,6 +521,7 @@ if view == NAV_DISCOVER:
                     st.session_state.suggestions = suggest_companies(
                         llm, profile, resume_text, prefs, n=n, exclude=[x.strip() for x in exclude.split(",") if x.strip()]
                     )
+                spend(st.session_state.suggestions.get("usage"))
             except LLMError as e:
                 st.error(str(e))
 
@@ -443,7 +536,9 @@ if view == NAV_DISCOVER:
                 fit = clamp(comp.get("estimated_fit"))
                 label, color = label_for(fit)
                 h1, h2 = st.columns([3, 1])
-                h1.markdown(f"### {comp.get('name', '')}")
+                h1.markdown(f"### {comp.get('name', '')}" + (" 🟢" if comp.get("job_board") else ""))
+                if comp.get("job_board"):
+                    h1.caption("🟢 Live job board: deep-dive uses real postings")
                 h1.caption(" · ".join(x for x in [comp.get("industry"), comp.get("size"), comp.get("hq")] if x))
                 h2.metric("Est. fit", fit)
                 h2.markdown(f":{color}[{label}]")
@@ -465,38 +560,54 @@ if view == NAV_DISCOVER:
                     args=(comp.get("name", ""),),
                     width="stretch",
                 )
-        st.caption("Estimated fit is a quick screen. Run a deep-dive for a fit score based on actual open roles.")
+        st.caption("Estimated fit is a quick screen. Run a deep-dive for a fit score based on actual open roles. "
+                   "🟢 = the company posts on Greenhouse, Lever or Ashby.")
+        st.caption(usage_line(sugg.get("usage")))
     else:
         st.info("Click **Suggest companies** to get tailored recommendations, or switch to **Research a company** to look one up yourself.")
 
 # ----- Research ------------------------------------------------------------ #
 elif view == NAV_RESEARCH:
     with st.form("search", clear_on_submit=False, border=False):
-        c1, c2 = st.columns([4, 1])
+        c1, c2, c3 = st.columns([3, 2, 1])
         company = c1.text_input("Company", placeholder="e.g. Stripe, Paycom, Datadog, Thoughtworks", label_visibility="collapsed")
-        submitted = c2.form_submit_button("Research", type="primary", width="stretch")
+        slug = c2.text_input(
+            "Job board slug (optional)", placeholder="Job board slug (optional)", label_visibility="collapsed",
+            help="The name in the company's Greenhouse / Lever / Ashby URL, e.g. 'gong' from "
+                 "boards.greenhouse.io/gong. Leave blank to auto-detect.",
+        )
+        submitted = c3.form_submit_button("Research", type="primary", width="stretch")
     if submitted and company.strip():
-        run_research(company.strip())
+        run_research(company.strip(), slug=slug.strip() or None)
     elif st.session_state.pending_company:
         pending = st.session_state.pending_company
         st.session_state.pending_company = None
         run_research(pending)
 
-    if len(st.session_state.history) > 1:
-        names = {k: st.session_state.research[k].get("company", {}).get("name") or st.session_state.research[k]["query"] for k in st.session_state.history}
-        if st.session_state.get("history_pick") not in names:
-            st.session_state.history_pick = st.session_state.active_key
-        st.session_state.active_key = st.selectbox(
-            "Previously researched",
-            st.session_state.history[::-1],
-            key="history_pick",
-            format_func=lambda k: names[k],
-        )
-
-    if st.session_state.active_key and st.session_state.active_key in st.session_state.research:
-        render_result(st.session_state.research[st.session_state.active_key])
-    else:
+    if not show_active_result():
         st.info("Type a company name to get a fit score, open roles you qualify for, interview prep, news from the past 90 days, and a product overview.")
+
+# ----- Paste a job description --------------------------------------------- #
+elif view == NAV_PASTE:
+    st.caption("For roles on Workday or a company's own careers site, which the free job-board lookup can't read. "
+               "The fit score is measured against this exact posting.")
+    with st.form("paste", border=True):
+        p1, p2 = st.columns(2)
+        p_company = p1.text_input("Company name", placeholder="e.g. Salesforce")
+        p_title = p2.text_input("Job title", placeholder="e.g. Backend Engineer II")
+        p_url = st.text_input("Job posting link (optional)")
+        p_jd = st.text_area("Job description", height=280, placeholder="Paste the full job description here")
+        go_p = st.form_submit_button("Analyze this role", type="primary")
+    if go_p:
+        if not p_company.strip() or len(p_jd.strip()) < 200:
+            st.warning("Add the company name and the full job description (at least a few paragraphs).")
+        else:
+            run_research(p_company.strip(), pasted_role={
+                "title": p_title.strip() or "Pasted role", "location": "",
+                "url": p_url.strip(), "description": p_jd.strip()[:20000], "source": "Pasted",
+            })
+    if not show_active_result():
+        st.info("Paste a job description to get a fit score against that posting, role-specific prep, interview prep, news and a product overview.")
 
 # ----- Profile ------------------------------------------------------------- #
 else:
@@ -526,3 +637,6 @@ else:
             st.caption("Tip: copy suggested target roles into the sidebar preferences to sharpen suggestions.")
     with st.expander("Raw resume text the agent reads"):
         st.text(resume_text)
+
+# Session spend: rendered last so it includes anything spent during this run
+spend_slot.caption(f"💲 Session spend (est.): **${st.session_state.session_cost:.3f}**")

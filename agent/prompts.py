@@ -110,7 +110,27 @@ Return JSON:
 estimated_fit is 0-100, judged on three things only: skill match (50%), years of experience vs. what their roles require (25%), and domain match (25%)."""
 
 
-def company_prompt(company: str, profile: dict, prefs: dict) -> str:
+def _headlines_block(headlines: list[dict]) -> str:
+    return "\n".join(
+        f"{i} | {h.get('date') or 'undated'} | {h.get('source') or ''} | {h.get('headline', '')}"
+        for i, h in enumerate(headlines)
+    )
+
+
+def company_prompt(company: str, profile: dict, prefs: dict, headlines: list[dict] | None = None) -> str:
+    if headlines:
+        news_task = f"""NEWS: Below are real headlines about "{company}" from the last {NEWS_WINDOW_DAYS} days (free Google News feed), as index | date | source | headline. Do NOT search for news. Pick up to {MAX_NEWS_ITEMS} that matter to a job seeker: funding/earnings, layoffs or hiring freezes, hiring expansions, acquisitions, leadership changes, product launches, AI initiatives, office/remote policy, legal/regulatory events. Skip stock-price chatter, listicles, duplicates and headlines about a different company with a similar name. Refer to each by its index; headline, URL, source and date are filled in from the feed automatically.
+<headlines>
+{_headlines_block(headlines)}
+</headlines>
+Use web search only for the product overview and company facts, and only if you need it."""
+        news_schema = """{"index": 0, "summary": "1-2 sentences", "why_it_matters": "1-2 sentences",
+      "sentiment": "positive | neutral | negative"}"""
+    else:
+        news_task = f"""NEWS: Gather ALL notable news about the company published in the last {NEWS_WINDOW_DAYS} days, i.e. on or after {news_cutoff().isoformat()} (today is {date.today().isoformat()}). Search with recency terms (e.g. "{company} news {date.today().strftime('%B %Y')}", "{company} announces", "{company} layoffs OR hiring OR funding OR acquisition", the company newsroom/press page). Cover: funding/earnings, layoffs or hiring freezes, hiring expansions, acquisitions, leadership changes, product launches, AI initiatives, office/remote policy changes, legal/regulatory events. Exclude anything older than the cutoff even if it is important. For each item explain why it matters to THIS job seeker (hiring momentum, team stability, tech direction, interview talking point). If you find nothing in the window, return an empty news list."""
+        news_schema = """{"headline": "string", "date": "YYYY-MM-DD", "source": "publication",
+      "url": "https://...", "summary": "1-2 sentences", "why_it_matters": "1-2 sentences",
+      "sentiment": "positive | neutral | negative"}"""
     return f"""Research the company "{company}" for a job seeker.
 
 Candidate snapshot (to judge relevance of news):
@@ -120,7 +140,7 @@ Preferences:
 
 Find: what the company does and sells, its main products, customers, business model, competitors, and engineering stack/tech signals (engineering blog, job posts, GitHub).
 
-NEWS: Gather ALL notable news about the company published in the last {NEWS_WINDOW_DAYS} days, i.e. on or after {news_cutoff().isoformat()} (today is {date.today().isoformat()}). Search with recency terms (e.g. "{company} news {date.today().strftime('%B %Y')}", "{company} announces", "{company} layoffs OR hiring OR funding OR acquisition", the company newsroom/press page). Cover: funding/earnings, layoffs or hiring freezes, hiring expansions, acquisitions, leadership changes, product launches, AI initiatives, office/remote policy changes, legal/regulatory events. Exclude anything older than the cutoff even if it is important. For each item explain why it matters to THIS job seeker (hiring momentum, team stability, tech direction, interview talking point). If you find nothing in the window, return an empty news list.
+{news_task}
 
 If the name is ambiguous, pick the most likely company for a software-engineering job seeker and state the assumption in "disambiguation".
 
@@ -143,16 +163,38 @@ Return JSON:
     "culture_signals": ["values, eng practices, remote policy, etc."]
   }},
   "news": [
-    {{"headline": "string", "date": "YYYY-MM-DD", "source": "publication",
-      "url": "https://...", "summary": "1-2 sentences", "why_it_matters": "1-2 sentences",
-      "sentiment": "positive | neutral | negative"}}
+    {news_schema}
   ]
 }}
 ```
 Return up to {MAX_NEWS_ITEMS} news items, newest first, one item per distinct story (merge duplicate coverage)."""
 
 
-def roles_prompt(company: str, profile: dict, resume_text: str, prefs: dict) -> str:
+def _postings_block(postings: list[dict], jd_chars: int) -> str:
+    return "\n\n".join(
+        f"### [{p['index']}] {p.get('title', '')} ({p.get('location') or 'location not stated'})\n"
+        f"{(p.get('description') or 'No description available.')[:jd_chars]}"
+        for p in postings
+    )
+
+
+def roles_prompt(
+    company: str, profile: dict, resume_text: str, prefs: dict,
+    postings: list[dict] | None = None, jd_chars: int = 4000,
+) -> str:
+    if postings:
+        method = f"""These are REAL postings from {company}'s job board or pasted by the candidate. Do NOT search for roles.
+<postings>
+{_postings_block(postings, jd_chars)}
+</postings>
+
+Method:
+1. For each posting the candidate meets most core requirements for, or is a credible stretch on (at most one level above their seniority), return a role entry with its index. Omit the rest.
+2. Title, URL and location are filled in from the posting automatically; focus on the analysis.
+3. Read years_required from the description ("3+", "2-5", or "not stated").
+4. Score the three fit dimensions below against these postings."""
+        role_fields = '"index": 0, "team": "string", "remote": "remote | hybrid | onsite | unknown",\n      "seniority": "string", "years_required": "e.g. 3+ / not stated",'
+        return _roles_with_postings(company, profile, resume_text, prefs, method, role_fields)
     return f"""Find CURRENT open roles at "{company}" that this candidate realistically qualifies for, then score overall fit.
 
 <resume>
@@ -205,6 +247,110 @@ Return JSON:
   }}
 }}
 ```"""
+
+
+def _roles_with_postings(company, profile, resume_text, prefs, method, role_fields) -> str:
+    return f"""Score how well this candidate fits open roles at "{company}", then score overall fit.
+
+<resume>
+{resume_text}
+</resume>
+
+Candidate profile:
+{json.dumps(profile, indent=2)}
+
+Preferences:
+{_prefs_block(prefs)}
+
+{method}
+
+Fit dimensions (0-100, each with one sentence of evidence):
+- skills: how well the candidate's hard skills match what the roles require. 90+ = meets nearly all required skills; 50 = about half.
+- years_experience: candidate's relevant years vs. the years the roles require. Meets or exceeds = 85-100; 1 year short = ~65; 2 years short = ~45; 3+ years short = below 30. If no posting states years, judge from seniority and say so.
+- domain: familiarity with the company's industry and problem space, based on resume evidence. Transferable-but-not-direct = 50-70.
+Do not factor location, remote policy or work authorization into these scores; mention them in hiring_notes.
+If no posting is a realistic fit, return an empty roles list and say which role families to watch in hiring_notes.
+
+Return JSON:
+```json
+{{
+  "roles": [
+    {{
+      {role_fields}
+      "match_score": 0,
+      "requirements_met": ["..."],
+      "gaps": ["..."],
+      "why_you_fit": "2 sentences citing resume evidence"
+    }}
+  ],
+  "hiring_notes": "hiring momentum, location/remote and sponsorship notes from the postings, roles to watch",
+  "fit": {{
+    "breakdown": {{
+      "skills": {{"score": 0, "evidence": "string"}},
+      "years_experience": {{"score": 0, "evidence": "string"}},
+      "domain": {{"score": 0, "evidence": "string"}}
+    }},
+    "candidate_years": 0,
+    "summary": "3-4 sentence honest verdict",
+    "strengths": ["specific selling points for this company"],
+    "gaps": ["specific gaps"],
+    "gap_closers": ["concrete actions to close gaps before applying"]
+  }}
+}}
+```"""
+
+
+def board_match_prompt(company: str, profile: dict, resume_text: str, jobs: list[dict], max_n: int) -> str:
+    titles = "\n".join(f"{i} | {j.get('title', '')} | {j.get('location', '')}" for i, j in enumerate(jobs))
+    return f"""Pick the open roles at "{company}" this candidate is a realistic fit for. Do not search the web.
+
+<resume>
+{resume_text}
+</resume>
+
+Candidate profile:
+{json.dumps({k: profile.get(k) for k in ("headline", "years_experience", "seniority", "core_skills", "suggested_target_roles", "location")}, indent=2)}
+
+Open roles (index | title | location):
+{titles}
+
+Return the {max_n} roles closest to the candidate's function and seniority, best first, scored 0-100 from the title and location alone (85+ = right function and level; below 50 = poor fit). Low scores are fine; they will be checked against the full description later. Return an empty list only if nothing is even close.
+
+Return JSON:
+```json
+{{"matches": [{{"index": 0, "score": 0, "reason": "one line"}}]}}
+```"""
+
+
+def role_prep_prompt(company: str, profile: dict, resume_text: str, role: dict, jd_chars: int = 8000) -> str:
+    jd = (role.get("description") or "").strip()
+    if not jd:
+        jd = "No full description available. Requirements noted earlier: " + "; ".join(
+            (role.get("requirements_met") or []) + (role.get("gaps") or [])
+        )
+    return f"""Prepare this candidate to interview for one specific role at "{company}". Do not search the web.
+
+<resume>
+{resume_text}
+</resume>
+
+Candidate profile:
+{json.dumps({k: profile.get(k) for k in ("headline", "years_experience", "seniority", "core_skills")}, indent=2)}
+
+<job_description title="{role.get('title', '')}">
+{jd[:jd_chars]}
+</job_description>
+
+Return JSON:
+```json
+{{
+  "requirement_map": [{{"requirement": "from the JD", "evidence": "matching resume item", "strength": "strong | partial | gap"}}],
+  "gap_plan": ["how to address each gap honestly in the interview"],
+  "questions": [{{"question": "string", "how_to_answer": "tie to a specific resume item"}}],
+  "pitch": "60-second 'why me for this role' answer in first person"
+}}
+```
+6-8 requirements, 8 questions. Never invent resume facts."""
 
 
 def prep_prompt(company: str, profile: dict, resume_text: str, company_data: dict, roles_data: dict) -> str:

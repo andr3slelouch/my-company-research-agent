@@ -74,6 +74,8 @@ def to_markdown(r: dict[str, Any], candidate: str = "") -> str:
             out.append(f"- **{d.get('day')}: {d.get('focus')}** — " + "; ".join(d.get("tasks", [])))
 
     out.append(f"\n## Recent news (past {r.get('news_window_days', 90)} days)\n")
+    if (r.get("data_sources") or {}).get("news"):
+        out.append(f"_Source: {r['data_sources']['news']}_\n")
     for n in r.get("news", []):
         when = "date unverified" if n.get("date_unverified") else n.get("date", "")
         out.append(f"- **{when}** [{n.get('headline')}]({n.get('url', '')}) ({n.get('source', '')})  \n  {n.get('summary', '')}  \n  _Why it matters:_ {n.get('why_it_matters', '')}")

@@ -193,3 +193,74 @@ def test_news_cap():
 def test_company_prompt_states_cutoff():
     p = prompts.company_prompt("Acme", {}, {})
     assert "90 days" in p and "up to 15" in p
+
+
+# ---------- Merged from the fork: free job boards, free news, role prep, cost ----------
+from agent.job_boards import slug_candidates  # noqa: E402
+from agent.llm import add_usage, cost_of, new_usage  # noqa: E402
+from agent.news import parse_rss  # noqa: E402
+from agent.research import _attach_headlines, _attach_posting_facts  # noqa: E402
+
+RSS = b"""<?xml version="1.0"?><rss><channel>
+<item><title>Acme launches AI agent - TechCrunch</title><link>https://news.example/a</link>
+<pubDate>Mon, 02 Nov 2026 10:00:00 GMT</pubDate><source url="https://techcrunch.com">TechCrunch</source></item>
+<item><title>No date story</title><link>https://news.example/b</link></item>
+</channel></rss>"""
+
+
+def test_slug_candidates():
+    assert slug_candidates("Scale AI, Inc.") == ["scaleai", "scale-ai"]
+    assert slug_candidates("Stripe") == ["stripe"]
+    assert slug_candidates("Anything", override=" Gong ") == ["gong"]
+
+
+def test_parse_rss_strips_publisher_suffix():
+    items = parse_rss(RSS)
+    assert items[0] == {"headline": "Acme launches AI agent", "url": "https://news.example/a",
+                        "source": "TechCrunch", "date": "2026-11-02"}
+    assert items[1]["date"] == ""
+    kept, dropped = filter_recent_news(items, today=TODAY)
+    assert kept[0]["headline"] == "Acme launches AI agent" and kept[1]["date_unverified"]
+
+
+def test_posting_facts_come_from_board_not_model():
+    postings = [{"title": "Backend Engineer", "location": "Remote", "url": "https://boards/1",
+                 "description": "Java", "posted": "2026-11-01", "source": "Greenhouse"}]
+    roles = [
+        {"index": 0, "title": "HALLUCINATED", "url": "https://fake", "match_score": 80},
+        {"index": 7, "title": "Not a real posting", "match_score": 99},  # out of range: dropped
+        "garbage",
+    ]
+    out = _attach_posting_facts(roles, postings)
+    assert len(out) == 1
+    assert out[0]["title"] == "Backend Engineer" and out[0]["url"] == "https://boards/1"
+    assert out[0]["match_score"] == 80
+
+
+def test_news_picks_map_to_real_headlines():
+    headlines = [{"headline": "Real one", "url": "https://n/1", "source": "X", "date": "2026-11-01"}]
+    picks = [{"index": 0, "why_it_matters": "hiring", "headline": "made up"}, {"index": 3}]
+    out = _attach_headlines(picks, headlines)
+    assert out == [{"headline": "Real one", "url": "https://n/1", "source": "X", "date": "2026-11-01",
+                    "summary": "", "why_it_matters": "hiring", "sentiment": ""}]
+
+
+def test_cost_estimate():
+    u = add_usage({"input_tokens": 1_000_000, "output_tokens": 0, "searches": 2},
+                  {"input_tokens": 0, "output_tokens": 1_000_000, "searches": 0})
+    assert u == {"input_tokens": 1_000_000, "output_tokens": 1_000_000, "searches": 2}
+    assert round(cost_of(u, "claude-haiku-5-5"), 4) == round(0.10 + 0.50 + 0.02, 4)
+    assert cost_of(new_usage()) == 0
+
+
+def test_new_prompt_modes_render():
+    pr = {"headline": "dev", "core_skills": ["Java"]}
+    with_news = prompts.company_prompt("Acme", pr, {}, headlines=[{"headline": "Acme ships", "date": "2026-11-01"}])
+    assert "Do NOT search for news" in with_news and "0 | 2026-11-01" in with_news
+    with_posts = prompts.roles_prompt("Acme", pr, "resume", {}, postings=[
+        {"index": 0, "title": "SWE", "location": "", "description": "Go, 3+ years"}])
+    assert "Do NOT search for roles" in with_posts and "[0] SWE" in with_posts
+    for p in (with_news, with_posts,
+              prompts.board_match_prompt("Acme", pr, "resume", [{"title": "SWE", "location": "NYC"}], 5),
+              prompts.role_prep_prompt("Acme", pr, "resume", {"title": "SWE", "description": "Go"})):
+        assert "```json" in p and "{{" not in p
