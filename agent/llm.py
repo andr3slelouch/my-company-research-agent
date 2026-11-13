@@ -17,6 +17,13 @@ DEFAULT_MODEL = "claude-haiku-5-5"
 MODEL_LABEL = "Claude Haiku 5.5"
 WEB_SEARCH_TOOL_TYPE = "web_search_20250305"
 
+# Current models think before answering, and thinking + web-search results count
+# against max_tokens. Small budgets get used up before any JSON is written, so every
+# call gets at least this much room (you only pay for tokens actually generated).
+MIN_MAX_TOKENS = 16000
+# "low" effort = shorter thinking: cheaper and faster, plenty for research/extraction.
+EFFORT = "low"
+
 
 @dataclass
 class LLMResult:
@@ -62,10 +69,13 @@ class ResearchLLM:
         texts: list[str] = []
         sources: dict[str, dict[str, str]] = {}
         searches = 0
+        max_tokens = max(max_tokens, MIN_MAX_TOKENS)
+        stop_reason = None
 
         for _ in range(4):  # resume up to 3 pause_turns
             kwargs: dict[str, Any] = dict(
-                model=self.model, max_tokens=max_tokens, system=system, messages=messages
+                model=self.model, max_tokens=max_tokens, system=system, messages=messages,
+                output_config={"effort": EFFORT},
             )
             if tools:
                 kwargs["tools"] = tools
@@ -94,12 +104,20 @@ class ResearchLLM:
                             if url:
                                 sources.setdefault(url, {"url": url, "title": getattr(r, "title", "") or url})
 
-            if resp.stop_reason == "pause_turn":
+            stop_reason = resp.stop_reason
+            if stop_reason == "pause_turn":
                 messages.append({"role": "assistant", "content": resp.content})
                 continue
             break
 
         raw = "\n".join(texts)
+        if stop_reason == "refusal":
+            raise LLMError("The model declined this request. Try rephrasing or a different company.")
+        if not raw.strip() and stop_reason == "max_tokens":
+            raise LLMError(
+                f"The model used its whole {max_tokens}-token budget before answering. "
+                "Try again, or raise MIN_MAX_TOKENS in agent/llm.py."
+            )
         try:
             data = extract_json(raw)
         except JSONExtractionError:
@@ -114,6 +132,7 @@ class ResearchLLM:
         resp = self.client.messages.create(
             model=self.model,
             max_tokens=max_tokens,
+            output_config={"effort": EFFORT},
             system="You convert text into one valid JSON object. Output only JSON, no prose, no code fences.",
             messages=[{"role": "user", "content": f"Convert this into the single JSON object it describes:\n\n{raw[-30000:]}"}],
         )
