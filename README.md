@@ -101,6 +101,27 @@ The app runs on **Claude Haiku 5.5**. Measured on real runs (Nov 2026):
 
 Web-search caps per deep-dive: 1 for the product overview (5 if no news feed), 5 for roles only when there's no supported job board, 1 for interview prep. Prices used for the estimate live in `PRICES` in `agent/llm.py`; check them against claude.com/pricing. To get deeper research, add `MODEL = "claude-sonnet-5-5"` to the secrets, or change `DEFAULT_MODEL` in `agent/llm.py`.
 
+## Hourly job alerts by email
+
+`job_watcher.py` checks every company in `watchlist.json` (public Greenhouse / Lever / Ashby boards) once an hour, keeps new postings that pass the title, location and age filters, skips ones that require US citizenship or a security clearance, scores up to 30 of them against your resume in **one** Claude Haiku call (about $0.003 per run), and emails you the ones at or above `MIN_FIT` (default 55). Jobs it has already emailed are remembered, so each one shows up only once.
+
+```bash
+python job_watcher.py --check     # which boards resolve
+RESUME_PATH=~/resume.pdf python job_watcher.py --dry-run   # print the digest, no email
+```
+
+**Free hourly schedule with GitHub Actions** (`.github/workflows/job-alerts.yml`). Add these repository secrets (Settings → Secrets and variables → Actions):
+
+| Secret | Value |
+|---|---|
+| `ANTHROPIC_API_KEY` | your Claude API key |
+| `SMTP_USER` | your Gmail address |
+| `SMTP_PASSWORD` | a Gmail [app password](https://myaccount.google.com/apppasswords) (needs 2-Step Verification), not your normal password |
+| `ALERT_TO` | where to send alerts (can be the same address) |
+| `RESUME_B64` | `base64 -w0 resume.pdf` output, so the resume never lands in the repo |
+
+Optional repository *variable* `MIN_FIT` changes the threshold. Run it once by hand from the Actions tab (try "Dry run" first). Edit `watchlist.json` to add companies (`board` is `greenhouse`, `lever` or `ashby`; `slug` is the name in the board URL) or tune filters. Note: GitHub pauses scheduled workflows on repos with no commits for 60 days.
+
 ## Project layout
 
 ```

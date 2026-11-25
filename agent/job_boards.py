@@ -13,6 +13,7 @@ import re
 import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 from typing import Any
 
 TIMEOUT = 10
@@ -29,6 +30,13 @@ def _get_json(url: str) -> Any:
     req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "application/json"})
     with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
         return json.loads(r.read())
+
+
+def _ms_to_date(ms: Any) -> str:
+    try:
+        return datetime.fromtimestamp(int(ms) / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
+    except (TypeError, ValueError, OSError):
+        return ""
 
 
 def slug_candidates(company: str, override: str | None = None) -> list[str]:
@@ -49,7 +57,7 @@ def _greenhouse(slug: str) -> list[dict]:
     return [
         {"title": j.get("title", ""), "location": (j.get("location") or {}).get("name", ""),
          "url": j.get("absolute_url", ""), "description": _clean(j.get("content", "")),
-         "posted": (j.get("updated_at") or "")[:10], "source": "Greenhouse"}
+         "posted": (j.get("first_published") or j.get("updated_at") or "")[:10], "source": "Greenhouse"}
         for j in data.get("jobs", [])
     ]
 
@@ -64,7 +72,7 @@ def _lever(slug: str) -> list[dict]:
         out.append({
             "title": j.get("text", ""), "location": (j.get("categories") or {}).get("location", ""),
             "url": j.get("hostedUrl", ""), "description": f"{_clean(j.get('descriptionPlain', ''))} {lists}".strip(),
-            "posted": "", "source": "Lever",
+            "posted": _ms_to_date(j.get("createdAt")), "source": "Lever",
         })
     return out
 
@@ -77,6 +85,9 @@ def _ashby(slug: str) -> list[dict]:
          "posted": (j.get("publishedAt") or "")[:10], "source": "Ashby"}
         for j in data.get("jobs", [])
     ]
+
+
+BOARDS = {"greenhouse": _greenhouse, "lever": _lever, "ashby": _ashby}
 
 
 def fetch_jobs(company: str, slug_override: str | None = None) -> tuple[list[dict], str | None]:

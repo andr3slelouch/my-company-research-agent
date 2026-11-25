@@ -1,0 +1,520 @@
+{
+ "profile_note": "Backend / data / AI-leaning software engineer (Java, Node.js/NestJS, Python, PostgreSQL, Neo4j, Redis, polyglot persistence, LLM evaluation). Authorized to work in the US. Lives near Oklahoma City; wants remote-US roles or on-site/hybrid in the OKC area. Mid-level, not senior/staff.",
+ "filters": {
+  "min_fit": 55,
+  "max_age_days": 14,
+  "skip_blocked": true,
+  "title_include": [
+   "engineer",
+   "developer",
+   "programmer",
+   "software",
+   "swe",
+   "sde"
+  ],
+  "title_exclude": [
+   "senior",
+   "sr",
+   "staff",
+   "principal",
+   "lead",
+   "manager",
+   "director",
+   "head",
+   "vp",
+   "architect",
+   "intern",
+   "internship",
+   "mechanical",
+   "electrical",
+   "hardware",
+   "firmware",
+   "ios",
+   "android",
+   "sales",
+   "recruiter",
+   "account executive"
+  ],
+  "location_us": [
+   "united states",
+   "usa",
+   "us",
+   "u.s.",
+   "america",
+   "americas",
+   "north america",
+   "oklahoma",
+   "okc",
+   "oklahoma city",
+   "ok"
+  ],
+  "location_include": [
+   "remote",
+   "anywhere",
+   "distributed"
+  ],
+  "location_exclude": [
+   "canada",
+   "toronto",
+   "vancouver",
+   "uk",
+   "united kingdom",
+   "london",
+   "ireland",
+   "dublin",
+   "germany",
+   "berlin",
+   "munich",
+   "france",
+   "paris",
+   "netherlands",
+   "amsterdam",
+   "spain",
+   "madrid",
+   "barcelona",
+   "portugal",
+   "lisbon",
+   "poland",
+   "warsaw",
+   "india",
+   "bangalore",
+   "bengaluru",
+   "hyderabad",
+   "pune",
+   "singapore",
+   "japan",
+   "tokyo",
+   "australia",
+   "sydney",
+   "melbourne",
+   "brazil",
+   "sao paulo",
+   "mexico",
+   "argentina",
+   "colombia",
+   "chile",
+   "costa rica",
+   "emea",
+   "apac",
+   "latam",
+   "europe",
+   "israel",
+   "tel aviv",
+   "korea",
+   "seoul",
+   "switzerland",
+   "zurich",
+   "sweden",
+   "stockholm",
+   "denmark",
+   "copenhagen"
+  ]
+ },
+ "companies": [
+  {
+   "name": "Affirm",
+   "board": "greenhouse",
+   "slug": "affirm"
+  },
+  {
+   "name": "Airbnb",
+   "board": "greenhouse",
+   "slug": "airbnb"
+  },
+  {
+   "name": "Airbyte",
+   "board": "ashby",
+   "slug": "airbyte"
+  },
+  {
+   "name": "Airtable",
+   "board": "greenhouse",
+   "slug": "airtable"
+  },
+  {
+   "name": "Anthropic",
+   "board": "greenhouse",
+   "slug": "anthropic"
+  },
+  {
+   "name": "Asana",
+   "board": "greenhouse",
+   "slug": "asana"
+  },
+  {
+   "name": "Benchling",
+   "board": "ashby",
+   "slug": "benchling"
+  },
+  {
+   "name": "Brex",
+   "board": "greenhouse",
+   "slug": "brex"
+  },
+  {
+   "name": "Canonical",
+   "board": "greenhouse",
+   "slug": "canonical"
+  },
+  {
+   "name": "Chime",
+   "board": "greenhouse",
+   "slug": "chime"
+  },
+  {
+   "name": "ClickHouse",
+   "board": "ashby",
+   "slug": "clickhouse"
+  },
+  {
+   "name": "Cloudflare",
+   "board": "greenhouse",
+   "slug": "cloudflare"
+  },
+  {
+   "name": "Cockroach Labs",
+   "board": "greenhouse",
+   "slug": "cockroachlabs"
+  },
+  {
+   "name": "Code for America",
+   "board": "greenhouse",
+   "slug": "codeforamerica"
+  },
+  {
+   "name": "Cohere",
+   "board": "ashby",
+   "slug": "cohere"
+  },
+  {
+   "name": "Coinbase",
+   "board": "greenhouse",
+   "slug": "coinbase"
+  },
+  {
+   "name": "Coursera",
+   "board": "greenhouse",
+   "slug": "coursera"
+  },
+  {
+   "name": "Databricks",
+   "board": "greenhouse",
+   "slug": "databricks"
+  },
+  {
+   "name": "Datadog",
+   "board": "greenhouse",
+   "slug": "datadog"
+  },
+  {
+   "name": "Doximity",
+   "board": "greenhouse",
+   "slug": "doximity"
+  },
+  {
+   "name": "Dropbox",
+   "board": "greenhouse",
+   "slug": "dropbox"
+  },
+  {
+   "name": "Duolingo",
+   "board": "greenhouse",
+   "slug": "duolingo"
+  },
+  {
+   "name": "Elastic",
+   "board": "greenhouse",
+   "slug": "elastic"
+  },
+  {
+   "name": "Elevenlabs",
+   "board": "ashby",
+   "slug": "elevenlabs"
+  },
+  {
+   "name": "Figma",
+   "board": "greenhouse",
+   "slug": "figma"
+  },
+  {
+   "name": "Fivetran",
+   "board": "greenhouse",
+   "slug": "fivetran"
+  },
+  {
+   "name": "Fly.io",
+   "board": "lever",
+   "slug": "fly"
+  },
+  {
+   "name": "GitLab",
+   "board": "greenhouse",
+   "slug": "gitlab"
+  },
+  {
+   "name": "Glean",
+   "board": "greenhouse",
+   "slug": "gleanwork"
+  },
+  {
+   "name": "Grafana Labs",
+   "board": "greenhouse",
+   "slug": "grafanalabs"
+  },
+  {
+   "name": "Gusto",
+   "board": "greenhouse",
+   "slug": "gusto"
+  },
+  {
+   "name": "Harvey",
+   "board": "ashby",
+   "slug": "harvey"
+  },
+  {
+   "name": "Instacart",
+   "board": "greenhouse",
+   "slug": "instacart"
+  },
+  {
+   "name": "Khan Academy",
+   "board": "greenhouse",
+   "slug": "khanacademy"
+  },
+  {
+   "name": "Kong",
+   "board": "ashby",
+   "slug": "kong"
+  },
+  {
+   "name": "LangChain",
+   "board": "ashby",
+   "slug": "langchain"
+  },
+  {
+   "name": "Linear",
+   "board": "ashby",
+   "slug": "linear"
+  },
+  {
+   "name": "Mercury",
+   "board": "greenhouse",
+   "slug": "mercury"
+  },
+  {
+   "name": "Modal",
+   "board": "ashby",
+   "slug": "modal"
+  },
+  {
+   "name": "MongoDB",
+   "board": "greenhouse",
+   "slug": "mongodb"
+  },
+  {
+   "name": "Mozilla",
+   "board": "greenhouse",
+   "slug": "mozilla"
+  },
+  {
+   "name": "Nava PBC",
+   "board": "greenhouse",
+   "slug": "navapbc"
+  },
+  {
+   "name": "Nearform",
+   "board": "greenhouse",
+   "slug": "nearform"
+  },
+  {
+   "name": "Neo4j",
+   "board": "greenhouse",
+   "slug": "neo4j"
+  },
+  {
+   "name": "Neon",
+   "board": "lever",
+   "slug": "neon"
+  },
+  {
+   "name": "Notion",
+   "board": "ashby",
+   "slug": "notion"
+  },
+  {
+   "name": "Okta",
+   "board": "greenhouse",
+   "slug": "okta"
+  },
+  {
+   "name": "OpenAI",
+   "board": "ashby",
+   "slug": "openai"
+  },
+  {
+   "name": "Oscar Health",
+   "board": "greenhouse",
+   "slug": "oscar"
+  },
+  {
+   "name": "Perplexity",
+   "board": "ashby",
+   "slug": "perplexity"
+  },
+  {
+   "name": "Pinecone",
+   "board": "ashby",
+   "slug": "pinecone"
+  },
+  {
+   "name": "Pinterest",
+   "board": "greenhouse",
+   "slug": "pinterest"
+  },
+  {
+   "name": "Plaid",
+   "board": "ashby",
+   "slug": "plaid"
+  },
+  {
+   "name": "PlanetScale",
+   "board": "greenhouse",
+   "slug": "planetscale"
+  },
+  {
+   "name": "PostHog",
+   "board": "ashby",
+   "slug": "posthog"
+  },
+  {
+   "name": "Railway",
+   "board": "ashby",
+   "slug": "railway"
+  },
+  {
+   "name": "Ramp",
+   "board": "greenhouse",
+   "slug": "ramp"
+  },
+  {
+   "name": "Redis",
+   "board": "ashby",
+   "slug": "redis"
+  },
+  {
+   "name": "Remote",
+   "board": "greenhouse",
+   "slug": "remote"
+  },
+  {
+   "name": "Render",
+   "board": "ashby",
+   "slug": "render"
+  },
+  {
+   "name": "Replit",
+   "board": "ashby",
+   "slug": "replit"
+  },
+  {
+   "name": "Robinhood",
+   "board": "greenhouse",
+   "slug": "robinhood"
+  },
+  {
+   "name": "Samsara",
+   "board": "greenhouse",
+   "slug": "samsara"
+  },
+  {
+   "name": "Scale AI",
+   "board": "greenhouse",
+   "slug": "scaleai"
+  },
+  {
+   "name": "Sentry",
+   "board": "ashby",
+   "slug": "sentry"
+  },
+  {
+   "name": "SingleStore",
+   "board": "greenhouse",
+   "slug": "singlestore"
+  },
+  {
+   "name": "Snowflake",
+   "board": "ashby",
+   "slug": "snowflake"
+  },
+  {
+   "name": "SoFi",
+   "board": "greenhouse",
+   "slug": "sofi"
+  },
+  {
+   "name": "Stripe",
+   "board": "greenhouse",
+   "slug": "stripe"
+  },
+  {
+   "name": "Supabase",
+   "board": "ashby",
+   "slug": "supabase"
+  },
+  {
+   "name": "Temporal",
+   "board": "ashby",
+   "slug": "temporal"
+  },
+  {
+   "name": "Thoughtworks",
+   "board": "ashby",
+   "slug": "thoughtworks"
+  },
+  {
+   "name": "Toptal",
+   "board": "lever",
+   "slug": "toptal"
+  },
+  {
+   "name": "Turing",
+   "board": "greenhouse",
+   "slug": "turing"
+  },
+  {
+   "name": "Twilio",
+   "board": "greenhouse",
+   "slug": "twilio"
+  },
+  {
+   "name": "Vercel",
+   "board": "greenhouse",
+   "slug": "vercel"
+  },
+  {
+   "name": "Weaviate",
+   "board": "ashby",
+   "slug": "weaviate"
+  },
+  {
+   "name": "Webflow",
+   "board": "ashby",
+   "slug": "webflow"
+  },
+  {
+   "name": "Wikimedia",
+   "board": "greenhouse",
+   "slug": "wikimedia"
+  },
+  {
+   "name": "Writer",
+   "board": "ashby",
+   "slug": "writer"
+  },
+  {
+   "name": "Zapier",
+   "board": "ashby",
+   "slug": "zapier"
+  }
+ ]
+}

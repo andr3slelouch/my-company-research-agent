@@ -1,0 +1,62 @@
+name: Job alerts
+
+on:
+  schedule:
+    - cron: "17 * * * *"   # hourly at minute 17 (UTC); GitHub may delay runs a few minutes
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (print digest, no email, no state saved)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: job-alerts
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -q "anthropic>=0.60" "pypdf>=4.0" "python-docx>=1.1"
+
+      # Already-emailed job IDs persist between runs in the Actions cache (private to workflows).
+      - name: Restore seen jobs
+        uses: actions/cache/restore@v4
+        with:
+          path: .seen_jobs.json
+          key: seen-jobs-${{ github.run_id }}
+          restore-keys: seen-jobs-
+
+      - name: Decode resume from secret
+        env:
+          RESUME_B64: ${{ secrets.RESUME_B64 }}
+        run: |
+          test -n "$RESUME_B64" || { echo "Set the RESUME_B64 secret (base64 of your resume PDF)"; exit 1; }
+          echo "$RESUME_B64" | base64 -d > resume.pdf
+
+      - name: Run watcher
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          ALERT_TO: ${{ secrets.ALERT_TO }}
+          MIN_FIT: ${{ vars.MIN_FIT }}
+          RESUME_PATH: resume.pdf
+        run: python job_watcher.py ${{ inputs.dry_run && '--dry-run' || '' }}
+
+      - name: Save seen jobs
+        if: success() && !inputs.dry_run
+        uses: actions/cache/save@v4
+        with:
+          path: .seen_jobs.json
+          key: seen-jobs-${{ github.run_id }}
+
+      - name: Remove resume
+        if: always()
+        run: rm -f resume.pdf

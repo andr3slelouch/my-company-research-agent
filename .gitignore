@@ -6,3 +6,9 @@ __pycache__/
 venv/
 .pytest_cache/
 .DS_Store
+
+# job watcher
+.seen_jobs.json
+resume.pdf
+resume.docx
+resume.md
