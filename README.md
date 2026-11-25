@@ -110,6 +110,18 @@ python job_watcher.py --check     # which boards resolve
 RESUME_PATH=~/resume.pdf python job_watcher.py --dry-run   # print the digest, no email
 ```
 
+An email goes out **only when there are new jobs at or above `MIN_FIT`**; an hour with nothing new sends nothing.
+
+**How locations are matched:** every location a posting lists is checked, not just the main one. Many US-eligible jobs say "United Kingdom" or "San Francisco" up front and list the US only as a secondary location (Ashby `secondaryLocations`, Lever `allLocations`, Greenhouse offices). A job passes if any location names the US or Oklahoma, if it's remote and lists a US city/country, or if it's plain "Remote" with no other country named. Set `"us_onsite": true` in `watchlist.json` to also keep US on-site jobs elsewhere. Jobs up to `max_age_days` (60) old are considered, because good roles often stay open for weeks. A company's `"note"` (for example an application limit) is shown next to each of its jobs.
+
+**Everyday commands** live in `deploy.sh` (needs the `gh` CLI): `./deploy.sh push "Title" ["Body"]`, `./deploy.sh budget 14.43`, `./deploy.sh minfit 60`, `./deploy.sh run [--dry] [--max 400]`, `./deploy.sh ship "Title" ["Body"] --budget 14.43 --max 400`, `./deploy.sh status`, `./deploy.sh log`, `./deploy.sh pause|resume`. `push` refuses to commit `.env`, resumes or state files.
+
+**Catch-up run:** after widening filters there may be hundreds of unseen jobs. Run the workflow by hand with `max_score` set to e.g. `400` (or `MAX_SCORE=400 ./run_local.sh`) to score them all at once, 30 per Claude call, instead of 30 per hour.
+
+**Run it on your own computer:** `cp .env.example .env`, fill it in (`.env` is never committed), then `./run_local.sh --dry-run`, `./run_local.sh` (real run, emails), `./run_local.sh --check` or `./run_local.sh --spend`. The local copy keeps its own memory of sent jobs, separate from GitHub's, so for scheduled alerts use one or the other, not both, or you'll get duplicates.
+
+**Spending:** Anthropic has no API that returns your prepaid balance, so the watcher keeps its own ledger (`.spend.json`) with the exact token cost of every run. Set `BUDGET_USD` to the credit balance the Anthropic console shows when you start (and add any later top-up to it) and every email footer, plus `--spend`, shows roughly what's left. When that falls under `LOW_BALANCE_USD` (default $1) you get one warning email. The ledger counts only this watcher; check https://console.anthropic.com/settings/billing for the real balance.
+
 **Free hourly schedule with GitHub Actions** (`.github/workflows/job-alerts.yml`). Add these repository secrets (Settings → Secrets and variables → Actions):
 
 | Secret | Value |
@@ -120,7 +132,7 @@ RESUME_PATH=~/resume.pdf python job_watcher.py --dry-run   # print the digest, n
 | `ALERT_TO` | where to send alerts (can be the same address) |
 | `RESUME_B64` | base64 of your resume, so it never lands in the repo. Secrets max out at 48 KB, so a text version is safest: `python -c "from agent.resume import extract_text; print(extract_text('r.pdf', open('r.pdf','rb').read()))" | base64 -w0` (a small PDF also works) |
 
-Optional repository *variable* `MIN_FIT` changes the threshold. Run it once by hand from the Actions tab (try "Dry run" first). Edit `watchlist.json` to add companies (`board` is `greenhouse`, `lever` or `ashby`; `slug` is the name in the board URL) or tune filters. Note: GitHub pauses scheduled workflows on repos with no commits for 60 days.
+Optional repository *variables*: `MIN_FIT` (threshold), `BUDGET_USD` (console balance when tracking started, plus top-ups), `LOW_BALANCE_USD`. Run it once by hand from the Actions tab (try "Dry run" first). Edit `watchlist.json` to add companies (`board` is `greenhouse`, `lever` or `ashby`; `slug` is the name in the board URL) or tune filters. Note: GitHub pauses scheduled workflows on repos with no commits for 60 days.
 
 ## Project layout
 

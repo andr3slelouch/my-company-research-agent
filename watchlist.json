@@ -1,9 +1,16 @@
 {
- "profile_note": "Backend / data / AI-leaning software engineer (Java, Node.js/NestJS, Python, PostgreSQL, Neo4j, Redis, polyglot persistence, LLM evaluation). Authorized to work in the US. Lives near Oklahoma City; wants remote-US roles or on-site/hybrid in the OKC area. Mid-level, not senior/staff.",
+ "_help": "filters.us_onsite: true also keeps US on-site/hybrid jobs outside Oklahoma (e.g. San Francisco offices). Per company, \"note\" is shown in the email next to every job from that company (e.g. application limits).",
+ "profile_note": "Backend / data / AI-leaning software engineer and published researcher. Master's in CS (EPN, 2026). Industry: Thoughtworks (Java, C#, Node.js/NestJS, PostgreSQL, Neo4j, Redis, TDD, client-facing consulting; also evaluated AI-generated code for LLM training), Llacsaa junior developer. Research: ADA Lab research technician 2023-2025; 6 peer-reviewed publications (ORCID 0009-0002-5080-9126) on polyglot persistence and data pipelines: PolyFuseQL (federated queries over SQL/NoSQL with PySpark, Applied Sciences 2026), X-SLR (Information 2026), OLAP + NoSQL systematic mapping (BDCC 2024), polyglot persistence with Python (Springer 2025), AI-assisted literature reviews with BERT topic clustering (Springer 2025), IEEE ICEDEG 2025. So research-engineer, data-infrastructure, data-pipeline and forward-deployed/solutions roles are realistic, not only SWE. Native Spanish, professional English. Authorized to work in the US. Lives near Oklahoma City; wants remote-US roles or OKC-area on-site/hybrid. Mid-level, not senior/staff. Known gaps: Kubernetes, ML training-data pipelines at very large scale.",
  "filters": {
   "min_fit": 55,
-  "max_age_days": 14,
+  "max_age_days": 60,
   "skip_blocked": true,
+  "us_onsite": false,
+  "employment_exclude": [
+   "part time",
+   "intern",
+   "temporary"
+  ],
   "title_include": [
    "engineer",
    "developer",
@@ -227,9 +234,10 @@
    "slug": "elastic"
   },
   {
-   "name": "Elevenlabs",
+   "name": "ElevenLabs",
    "board": "ashby",
-   "slug": "elevenlabs"
+   "slug": "elevenlabs",
+   "note": "ElevenLabs: max 2 applications per 90 days; no re-applying to the same job for 6 months. Pick carefully."
   },
   {
    "name": "Figma",

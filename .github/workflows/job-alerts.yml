@@ -9,6 +9,10 @@ on:
         description: "Dry run (print digest, no email, no state saved)"
         type: boolean
         default: false
+      max_score:
+        description: "Max new jobs to score this run (default 30; use e.g. 400 once to clear a backlog)"
+        type: string
+        default: "30"
 
 concurrency:
   group: job-alerts
@@ -33,6 +37,14 @@ jobs:
           key: seen-jobs-${{ github.run_id }}
           restore-keys: seen-jobs-
 
+      # Running total of Claude spend (separate cache so the seen-jobs cache above stays as it was).
+      - name: Restore spend ledger
+        uses: actions/cache/restore@v4
+        with:
+          path: .spend.json
+          key: spend-${{ github.run_id }}
+          restore-keys: spend-
+
       - name: Decode resume from secret
         env:
           RESUME_B64: ${{ secrets.RESUME_B64 }}
@@ -50,6 +62,9 @@ jobs:
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           ALERT_TO: ${{ secrets.ALERT_TO }}
           MIN_FIT: ${{ vars.MIN_FIT }}
+          BUDGET_USD: ${{ vars.BUDGET_USD }}
+          MAX_SCORE: ${{ inputs.max_score }}
+          LOW_BALANCE_USD: ${{ vars.LOW_BALANCE_USD }}
         run: python job_watcher.py ${{ inputs.dry_run && '--dry-run' || '' }}
 
       - name: Save seen jobs
@@ -58,6 +73,13 @@ jobs:
         with:
           path: .seen_jobs.json
           key: seen-jobs-${{ github.run_id }}
+
+      - name: Save spend ledger
+        if: success() && hashFiles('.spend.json') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: .spend.json
+          key: spend-${{ github.run_id }}
 
       - name: Remove resume
         if: always()

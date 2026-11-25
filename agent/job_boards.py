@@ -16,7 +16,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Any
 
-TIMEOUT = 10
+TIMEOUT = 25  # Ashby boards with full descriptions can be ~2 MB
 UA = "company-research-agent/1.0"
 
 
@@ -52,14 +52,35 @@ def slug_candidates(company: str, override: str | None = None) -> list[str]:
     return out
 
 
+# Every parser returns the same keys. Besides the primary `location` (for display), jobs carry
+# `locations` (primary + secondary + office names), `countries`, `remote` (True/False/None when
+# the board doesn't say), `employment` (e.g. "FullTime") and `compensation` (text, may be "").
+# The watcher filters on all of them: many US-eligible jobs list the US only as a secondary
+# location or give a city ("San Francisco") as the primary one.
+
+
+def _uniq(items: list[str]) -> list[str]:
+    out: list[str] = []
+    for i in items:
+        i = (i or "").strip()
+        if i and i not in out:
+            out.append(i)
+    return out
+
+
 def _greenhouse(slug: str) -> list[dict]:
     data = _get_json(f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs?content=true")
-    return [
-        {"title": j.get("title", ""), "location": (j.get("location") or {}).get("name", ""),
-         "url": j.get("absolute_url", ""), "description": _clean(j.get("content", "")),
-         "posted": (j.get("first_published") or j.get("updated_at") or "")[:10], "source": "Greenhouse"}
-        for j in data.get("jobs", [])
-    ]
+    out = []
+    for j in data.get("jobs", []):
+        primary = (j.get("location") or {}).get("name", "")
+        offices = [o.get("name", "") for o in j.get("offices") or []] + [o.get("location") or "" for o in j.get("offices") or []]
+        out.append({
+            "title": j.get("title", ""), "location": primary, "locations": _uniq([primary, *offices]),
+            "countries": [], "remote": None, "employment": "", "compensation": "",
+            "url": j.get("absolute_url", ""), "description": _clean(j.get("content", "")),
+            "posted": (j.get("first_published") or j.get("updated_at") or "")[:10], "source": "Greenhouse",
+        })
+    return out
 
 
 def _lever(slug: str) -> list[dict]:
@@ -68,23 +89,47 @@ def _lever(slug: str) -> list[dict]:
         return []
     out = []
     for j in data:
+        cat = j.get("categories") or {}
         lists = " ".join(f"{li.get('text', '')}: {_clean(li.get('content', ''))}" for li in j.get("lists", []))
+        sal = j.get("salaryRange") or {}
+        comp = (f"{sal.get('currency', '')} {sal.get('min', ''):,}-{sal.get('max', ''):,} {sal.get('interval', '')}".strip()
+                if isinstance(sal.get("min"), (int, float)) and isinstance(sal.get("max"), (int, float)) else "")
+        wt = (j.get("workplaceType") or "").lower()
         out.append({
-            "title": j.get("text", ""), "location": (j.get("categories") or {}).get("location", ""),
+            "title": j.get("text", ""), "location": cat.get("location", ""),
+            "locations": _uniq([cat.get("location", ""), *(cat.get("allLocations") or [])]),
+            "countries": _uniq([j.get("country") or ""]),
+            "remote": True if wt == "remote" else False if wt in ("onsite", "on-site") else None,
+            "employment": cat.get("commitment", ""), "compensation": comp,
             "url": j.get("hostedUrl", ""), "description": f"{_clean(j.get('descriptionPlain', ''))} {lists}".strip(),
             "posted": _ms_to_date(j.get("createdAt")), "source": "Lever",
         })
     return out
 
 
+def _ashby_country(addr: dict | None) -> str:
+    return (((addr or {}).get("postalAddress") or {}).get("addressCountry")) or ""
+
+
 def _ashby(slug: str) -> list[dict]:
-    data = _get_json(f"https://api.ashbyhq.com/posting-api/job-board/{slug}")
-    return [
-        {"title": j.get("title", ""), "location": j.get("location", ""), "url": j.get("jobUrl", ""),
-         "description": _clean(j.get("descriptionPlain") or j.get("descriptionHtml", "")),
-         "posted": (j.get("publishedAt") or "")[:10], "source": "Ashby"}
-        for j in data.get("jobs", [])
-    ]
+    data = _get_json(f"https://api.ashbyhq.com/posting-api/job-board/{slug}?includeCompensation=true")
+    out = []
+    for j in data.get("jobs", []):
+        if j.get("isListed") is False:
+            continue
+        sec = j.get("secondaryLocations") or []
+        wt = (j.get("workplaceType") or "").lower()
+        remote = True if (j.get("isRemote") or wt == "remote") else False if wt == "onsite" else None
+        out.append({
+            "title": j.get("title", ""), "location": j.get("location", ""),
+            "locations": _uniq([j.get("location", ""), *(s.get("location", "") for s in sec)]),
+            "countries": _uniq([_ashby_country(j.get("address")), *(_ashby_country(s.get("address")) for s in sec)]),
+            "remote": remote, "employment": j.get("employmentType") or "",
+            "compensation": ((j.get("compensation") or {}).get("compensationTierSummary") or ""),
+            "url": j.get("jobUrl", ""), "description": _clean(j.get("descriptionPlain") or j.get("descriptionHtml", "")),
+            "posted": (j.get("publishedAt") or "")[:10], "source": "Ashby",
+        })
+    return out
 
 
 BOARDS = {"greenhouse": _greenhouse, "lever": _lever, "ashby": _ashby}
