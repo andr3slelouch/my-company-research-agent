@@ -37,8 +37,11 @@ jobs:
         env:
           RESUME_B64: ${{ secrets.RESUME_B64 }}
         run: |
-          test -n "$RESUME_B64" || { echo "Set the RESUME_B64 secret (base64 of your resume PDF)"; exit 1; }
-          echo "$RESUME_B64" | base64 -d > resume.pdf
+          test -n "$RESUME_B64" || { echo "Set the RESUME_B64 secret (base64 of your resume PDF or text)"; exit 1; }
+          echo "$RESUME_B64" | base64 -d > resume.bin
+          # Secrets max out at 48 KB, so a text resume is allowed too; detect which one we got.
+          if head -c 4 resume.bin | grep -q '%PDF'; then mv resume.bin resume.pdf; else mv resume.bin resume.txt; fi
+          echo "RESUME_PATH=$(ls resume.pdf resume.txt 2>/dev/null)" >> "$GITHUB_ENV"
 
       - name: Run watcher
         env:
@@ -47,7 +50,6 @@ jobs:
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           ALERT_TO: ${{ secrets.ALERT_TO }}
           MIN_FIT: ${{ vars.MIN_FIT }}
-          RESUME_PATH: resume.pdf
         run: python job_watcher.py ${{ inputs.dry_run && '--dry-run' || '' }}
 
       - name: Save seen jobs
@@ -59,4 +61,4 @@ jobs:
 
       - name: Remove resume
         if: always()
-        run: rm -f resume.pdf
+        run: rm -f resume.pdf resume.txt resume.bin

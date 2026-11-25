@@ -118,7 +118,7 @@ RESUME_PATH=~/resume.pdf python job_watcher.py --dry-run   # print the digest, n
 | `SMTP_USER` | your Gmail address |
 | `SMTP_PASSWORD` | a Gmail [app password](https://myaccount.google.com/apppasswords) (needs 2-Step Verification), not your normal password |
 | `ALERT_TO` | where to send alerts (can be the same address) |
-| `RESUME_B64` | `base64 -w0 resume.pdf` output, so the resume never lands in the repo |
+| `RESUME_B64` | base64 of your resume, so it never lands in the repo. Secrets max out at 48 KB, so a text version is safest: `python -c "from agent.resume import extract_text; print(extract_text('r.pdf', open('r.pdf','rb').read()))" | base64 -w0` (a small PDF also works) |
 
 Optional repository *variable* `MIN_FIT` changes the threshold. Run it once by hand from the Actions tab (try "Dry run" first). Edit `watchlist.json` to add companies (`board` is `greenhouse`, `lever` or `ashby`; `slug` is the name in the board URL) or tune filters. Note: GitHub pauses scheduled workflows on repos with no commits for 60 days.
 
